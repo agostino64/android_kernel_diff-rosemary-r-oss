@@ -94,7 +94,7 @@ bool mt_get_irq_gic_targets(struct irq_data *d, cpumask_t *mask)
 	u32 cpu;
 	u32 cluster;
 	u64 routing_val;
-	u32 target_mask;
+	u64 target_mask;
 
 	/* for SPI/PPI, target to current cpu */
 	if (gic_irq(d) < 32) {
@@ -124,7 +124,7 @@ bool mt_get_irq_gic_targets(struct irq_data *d, cpumask_t *mask)
 		 */
 		target_mask = 1<<(cluster*4 + cpu);
 
-		pr_debug("%s:%d: irq(%d) target_mask(0x%x)\n",
+		pr_debug("%s:%d: irq(%d) target_mask(0x%llx)\n",
 				__func__, __LINE__, gic_irq(d), target_mask);
 	}
 
@@ -572,8 +572,7 @@ void _mt_irq_set_polarity(unsigned int hwirq, unsigned int polarity)
 #endif
 
 #if defined(CONFIG_MACH_MT6885) || defined(CONFIG_MACH_MT6873) || \
-	defined(CONFIG_MACH_MT6853) || defined(CONFIG_MACH_MT6893) ||\
-	defined(CONFIG_MACH_MT6781)
+	defined(CONFIG_MACH_MT6853) || defined(CONFIG_MACH_MT6893)
 #define GIC_INT_MASK (MCUSYS_BASE_SWMODE + 0xaa88)
 #define GIC500_ACTIVE_CPU_SHIFT 0
 #define GIC500_ACTIVE_CPU_MASK (0xff << GIC500_ACTIVE_CPU_SHIFT)

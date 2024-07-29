@@ -797,20 +797,12 @@ int mt6358_set_mtkaif_calibration_phase(struct snd_soc_component *cmpnt,
 
 static int get_auxadc_audio(void)
 {
-#if !defined(CONFIG_FPGA_EARLY_PORTING)
 	return pmic_get_auxadc_value(AUXADC_LIST_HPOFS_CAL);
-#else
-	return 1;
-#endif
 }
 
 static int get_accdet_auxadc(void)
 {
-#if !defined(CONFIG_FPGA_EARLY_PORTING)
 	return pmic_get_auxadc_value(AUXADC_LIST_ACCDET);
-#else
-	return 1;
-#endif
 }
 
 /* dl pga gain */
@@ -5961,8 +5953,9 @@ static int mtk_calculate_impedance_formula(int pcm_offset, int aux_diff)
 	/* R = V /I */
 	/* V = auxDiff * (1800mv /auxResolution)  /TrimBufGain */
 	/* I =  pcmOffset * DAC_constant * Gsdm * Gibuf */
+	long mul_val = pcm_offset * aux_diff;
 
-	return DIV_ROUND_CLOSEST(3600000 / pcm_offset * aux_diff, 7832);
+	return DIV_ROUND_CLOSEST(3600000 / mul_val, 7832);
 }
 
 static int calculate_impedance(struct mt6358_priv *priv,
@@ -6709,19 +6702,13 @@ static int get_hp_current_calibrate_val(struct mt6358_priv *priv)
 
 	/* 2. set RG_OTP_RD_SW */
 	regmap_update_bits(priv->regmap, MT6358_OTP_CON11, 0x0001, 0x0001);
-#if defined(CONFIG_SND_SOC_MT6366)
-	/* 3. set EFUSE addr */
-	/* HPDET_COMP[6:0] @ efuse bit 1880 ~ 1886 */
-	/* HPDET_COMP_SIGN @ efuse bit 1887 */
-	/* 1880 / 8 = 235 --> 0xeb */
-	regmap_update_bits(priv->regmap, MT6358_OTP_CON0, 0xff, 0xeb);
-#else
+
 	/* 3. set EFUSE addr */
 	/* HPDET_COMP[6:0] @ efuse bit 1696 ~ 1702 */
 	/* HPDET_COMP_SIGN @ efuse bit 1703 */
 	/* 1696 / 8 = 212 --> 0xd4 */
 	regmap_update_bits(priv->regmap, MT6358_OTP_CON0, 0xff, 0xd4);
-#endif
+
 	/* 4. Toggle RG_OTP_RD_TRIG */
 	regmap_read(priv->regmap, MT6358_OTP_CON8, &ret);
 	if (ret == 0)
@@ -7749,7 +7736,6 @@ static int mt6358_platform_driver_remove(struct platform_device *pdev)
 
 static const struct of_device_id mt6358_of_match[] = {
 	{.compatible = "mediatek,mt6358-sound",},
-	{.compatible = "mediatek,mt6366-sound",},
 	{}
 };
 MODULE_DEVICE_TABLE(of, mt6358_of_match);

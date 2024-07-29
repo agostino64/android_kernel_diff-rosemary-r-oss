@@ -158,25 +158,34 @@ static inline int is_ack_skb(int md_id, struct sk_buff *skb)
 				sizeof(struct ipv6hdr),
 				&nexthdr, &frag_off);
 
-			tcph = (struct tcphdr *)(skb->data + l4_off);
-			if (nexthdr == IPPROTO_TCP &&
-				!tcph->syn && !tcph->fin &&
-			    !tcph->rst &&
-				((total_len - l4_off) == (tcph->doff << 2)))
-				ret = 1;
+			if (nexthdr == IPPROTO_TCP) {
+				tcph = (struct tcphdr *)(skb->data + l4_off);
+
+				if (tcph->syn)
+					ret = 1;
+				else if (!tcph->fin && !tcph->rst &&
+					((total_len - l4_off) ==
+						(tcph->doff << 2)))
+					ret = 1;
+			}
 		}
 	} else if (packet_type == IPV4_VERSION) {
 		struct iphdr *iph = (struct iphdr *)skb->data;
 
 		if (ntohs(iph->tot_len) <=
 				128 - sizeof(struct ccci_header) - count) {
-			tcph = (struct tcphdr *)(skb->data + (iph->ihl << 2));
 
-			if (iph->protocol == IPPROTO_TCP && !tcph->syn &&
-				!tcph->fin && !tcph->rst &&
-				(ntohs(iph->tot_len) == (iph->ihl << 2) +
-				(tcph->doff << 2)))
-				ret = 1;
+			if (iph->protocol == IPPROTO_TCP) {
+				tcph = (struct tcphdr *)(skb->data + (iph->ihl << 2));
+
+				if (tcph->syn)
+					ret = 1;
+				else if (!tcph->fin && !tcph->rst &&
+					ntohs(iph->tot_len) ==
+					(iph->ihl << 2) + (tcph->doff << 2)) {
+					ret = 1;
+				}
+			}
 		}
 	}
 
@@ -1240,7 +1249,7 @@ static int ccmni_init(int md_id, struct ccmni_ccci_ops *ccci_info)
 		ccmni_dev_init(md_id, dev);
 
 		/* used to support auto add ipv6 mroute */
-		dev->type = ARPHRD_RAWIP;
+		dev->type = ARPHRD_PUREIP;
 
 		sprintf(dev->name, "%s%d", ctlb->ccci_ops->name, i);
 

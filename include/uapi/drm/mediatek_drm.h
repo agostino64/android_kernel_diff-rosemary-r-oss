@@ -145,14 +145,6 @@ struct drm_mtk_session {
 
 enum TONE_ENUM { PURP_TONE = 0, SKIN_TONE = 1, GRASS_TONE = 2, SKY_TONE = 3 };
 
-struct DISP_PQ_BYPASS_SWITCH {
-	int color_bypass;
-	int ccorr_bypass;
-	int gamma_bypass;
-	int dither_bypass;
-	int aal_bypass;
-};
-
 struct DISP_PQ_WIN_PARAM {
 	int split_en;
 	int start_x;
@@ -419,7 +411,6 @@ struct DISP_PQ_PARAM {
 #define DRM_MTK_CRTC_GETSFFENCE         0x0D
 
 /* PQ */
-#define DRM_MTK_PQ_DEBUG			0x1F
 #define DRM_MTK_SET_CCORR			0x20
 #define DRM_MTK_CCORR_EVENTCTL   0x21
 #define DRM_MTK_CCORR_GET_IRQ    0x22
@@ -533,7 +524,7 @@ struct drm_mtk_layer_config {
 };
 
 struct drm_mtk_layering_info {
-	struct drm_mtk_layer_config __user *input_config[3];
+	struct drm_mtk_layer_config *input_config[3];
 	int disp_mode[3];
 	/* index of crtc display mode including resolution, fps... */
 	int disp_mode_idx[3];
@@ -681,9 +672,6 @@ struct DRM_DISP_WRITE_REG {
 
 #define DRM_IOCTL_MTK_SEC_HND_TO_GEM_HND     DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_SEC_HND_TO_GEM_HND, struct drm_mtk_sec_gem_hnd)
-
-#define DRM_IOCTL_MTK_PQ_DEBUG    DRM_IOWR(DRM_COMMAND_BASE + \
-		DRM_MTK_PQ_DEBUG, struct DISP_PQ_BYPASS_SWITCH)
 
 #define DRM_IOCTL_MTK_SET_CCORR     DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_MTK_SET_CCORR, struct DRM_DISP_CCORR_COEF_T)

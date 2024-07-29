@@ -968,10 +968,6 @@ static void msdc_init_hw(struct msdc_host *host)
 	/* Reset */
 	msdc_reset_hw(host->id);
 
-#ifdef SUPPORT_NEW_TX
-	msdc_select_new_tx(host);
-#endif
-
 	/* Disable card detection */
 	MSDC_CLR_BIT32(MSDC_PS, MSDC_PS_CDEN);
 	if (!(host->mmc->caps & MMC_CAP_NONREMOVABLE)) {
@@ -5146,8 +5142,6 @@ static void msdc_cqhci_pre_cqe_enable(struct mmc_host *mmc, bool en)
 	void __iomem *base = host->base;
 
 	if (en) {
-		/* switch to DMA mode before cmdq_enable */
-		MSDC_CLR_BIT32(MSDC_CFG, MSDC_CFG_PIO);
 		/* enable busy check */
 		MSDC_SET_BIT32(MSDC_PATCH_BIT1, MSDC_PB1_BUSY_CHECK_SEL);
 		/* default write data / busy timeout 20 * 1000ms */
@@ -5193,10 +5187,11 @@ static int msdc_cqhci_reset(struct mmc_host *mmc)
 		pr_notice("WARN: data xf with cqhci enabled\n");
 
 #ifndef EMMC_RUNTIME_AUTOK_MERGE
-	ret = emmc_execute_dvfs_autok(host, MMC_SEND_TUNING_BLOCK_HS200);
+		ret = emmc_execute_dvfs_autok(host, MMC_SEND_TUNING_BLOCK_HS200);
 #else
-	ret = emmc_runtime_autok_merge(MMC_SEND_TUNING_BLOCK_HS200);
+		ret = emmc_runtime_autok_merge(MMC_SEND_TUNING_BLOCK_HS200);
 #endif
+
 
 	/* clear flag */
 	host->need_tune = TUNE_NONE;

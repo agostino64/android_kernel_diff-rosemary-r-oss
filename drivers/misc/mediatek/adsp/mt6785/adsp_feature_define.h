@@ -56,7 +56,6 @@ enum adsp_feature_id {
 	A2DP_PLAYBACK_FEATURE_ID        = 18,
 	KTV_FEATURE_ID                  = 19,
 	CAPTURE_RAW_FEATURE_ID          = 20,
-	FM_ADSP_FEATURE_ID              = 21,
 	ADSP_NUM_FEATURE_ID,
 };
 
@@ -79,7 +78,6 @@ ssize_t adsp_dump_feature_state(u32 cid, char *buffer, int size);
 int adsp_get_feature_index(const char *str);
 bool is_feature_in_set(u32 cid, u32 fid);
 bool adsp_feature_is_active(u32 cid);
-bool is_adsp_feature_in_active(void);
 bool flush_suspend_work(u32 cid);
 
 int _adsp_register_feature(u32 cid, u32 fid, u32 opt);

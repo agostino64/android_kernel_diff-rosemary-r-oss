@@ -17,6 +17,7 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
+#include <linux/sched/clock.h>
 
 #include "ion.h"
 #include "ion_priv.h"
@@ -102,6 +103,13 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case ION_IOC_ALLOC:
 	{
 		struct ion_handle *handle;
+		int heap_mask;
+
+		heap_mask = data.allocation.heap_id_mask;
+		if (heap_mask == ION_HEAP_MULTIMEDIA_MAP_MVA_MASK) {
+			IONMSG("no longer support map mva heap for userspace\n");
+			return -EINVAL;
+		}
 
 		handle = ion_alloc(
 						client, data.allocation.len,
@@ -115,7 +123,6 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return PTR_ERR(handle);
 		}
 
-		pass_to_user(handle);
 		data.allocation.handle = handle->id;
 
 		cleanup_handle = handle;
@@ -124,8 +131,17 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case ION_IOC_FREE:
 	{
 		struct ion_handle *handle;
+		unsigned long long time_s, time_e;
+		unsigned long long time_s_lock, time_e_lock;
+		struct task_struct *task = current->group_leader;
+		char task_comm[TASK_COMM_LEN];
+		pid_t pid;
 
+		get_task_comm(task_comm, task);
+		pid = task_pid_nr(task);
+		time_s_lock = sched_clock();
 		mutex_lock(&client->lock);
+		time_s = sched_clock();
 		handle = ion_handle_get_by_id_nolock(
 				client, data.handle.handle);
 		if (IS_ERR(handle)) {
@@ -135,9 +151,18 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 				data.handle.handle, ret);
 			return PTR_ERR(handle);
 		}
-		user_ion_free_nolock(client, handle);
+		ion_free_nolock(client, handle);
 		ion_handle_put_nolock(handle);
+		time_e = sched_clock();
+		if ((time_e - time_s) > 100000000) //100ms
+			IONMSG("ion_free unlock warnning, time:%llu, task:%s (%d)\n",
+			       (time_e - time_s), task_comm, pid);
+
 		mutex_unlock(&client->lock);
+		time_e_lock = sched_clock();
+		if ((time_e_lock - time_s_lock) > 150000000) //150ms
+			IONMSG("ion_free warnning, time:%llu, task:%s (%d)\n",
+			       (time_e_lock - time_s_lock), task_comm, pid);
 		break;
 	}
 	case ION_IOC_SHARE:
@@ -174,13 +199,8 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			IONMSG("ion_import fail: fd=%d, ret=%d\n",
 			       data.fd.fd, ret);
 			return ret;
-		} else {
-			handle = pass_to_user(handle);
-			if (IS_ERR(handle))
-				ret = PTR_ERR(handle);
-			else
-				data.handle.handle = handle->id;
 		}
+		data.handle.handle = handle->id;
 		break;
 	}
 	case ION_IOC_SYNC:
@@ -207,12 +227,8 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	if (dir & _IOC_READ) {
 		if (copy_to_user((void __user *)arg, &data, _IOC_SIZE(cmd))) {
-			if (cleanup_handle) {
-				mutex_lock(&client->lock);
-				user_ion_free_nolock(client, cleanup_handle);
-				ion_handle_put_nolock(cleanup_handle);
-				mutex_unlock(&client->lock);
-			}
+			if (cleanup_handle)
+				ion_free(client, cleanup_handle);
 			IONMSG(
 				"%s %d fail! cmd = %d, n = %d.\n",
 				__func__, __LINE__,

@@ -5,10 +5,6 @@
 
 ifeq ($(CONFIG_MACH_MT6833),y)
 	PDIR = mt6833
-else ifeq ($(CONFIG_MACH_MT6893),y)
-	PDIR = mt6893
-else ifeq ($(CONFIG_MACH_MT6781),y)
-	PDIR = mt6781
 else
 	PDIR = $(MTK_PLATFORM)
 endif
@@ -404,6 +400,12 @@ obj-$(CONFIG_THERMAL) += mtk_ts_pmic.o
 obj-$(CONFIG_THERMAL) += mtk_ts_charger.o
 #obj-$(CONFIG_THERMAL) += mtk_ts_charger2.o
 
+# 2021.02.04 longcheer jiangshitian change for pd-chg and main-cam thermal begin
+ifeq ($(CONFIG_TARGET_PROJECT_K7B),y)
+obj-$(CONFIG_THERMAL) += mtk_ts_btspdchg.o
+obj-$(CONFIG_THERMAL) += mtk_ts_btsmcam.o
+endif
+# 2021.02.04 longcheer jiangshitian change for pd-chg and main-cam thermal end
 
 ifneq ($(CONFIG_MTK_COMBO_WIFI),)
     obj-$(CONFIG_THERMAL) += mtk_ts_wmt.o

@@ -645,8 +645,7 @@ void ppm_cobra_init(void)
 	cobra_tbl = ioremap_nocache(PPM_COBRA_TBL_SRAM_ADDR,
 					PPM_COBRA_TBL_SRAM_SIZE);
 #else
-	cobra_tbl = kzalloc(sizeof(struct ppm_cobra_data), GFP_KERNEL);
-	ppm_info("cobra_tbl: %p\n", cobra_tbl);
+	cobra_tbl = kzalloc(PPM_COBRA_TBL_SRAM_SIZE, GFP_KERNEL);
 #endif
 	if (!cobra_tbl) {
 		WARN_ON(1);
@@ -777,7 +776,7 @@ void ppm_cobra_dump_tbl(struct seq_file *m)
 static unsigned int get_limit_opp_and_budget(void)
 {
 	unsigned int power = 0;
-	unsigned int i, j, k, idx, core;
+	unsigned int i, j, k, idx;
 
 	for (i = 0; i <= get_cluster_min_cpufreq_idx(PPM_CLUSTER_L); i++) {
 		cobra_lookup_data.limit[PPM_CLUSTER_L].opp = i;
@@ -787,18 +786,19 @@ static unsigned int get_limit_opp_and_budget(void)
 			cobra_lookup_data.limit[PPM_CLUSTER_B].opp = j;
 
 			for_each_ppm_clusters(k) {
-				core = cobra_lookup_data.limit[k].core;
-
-				if (!core)
+				if (!cobra_lookup_data.limit[k].core)
 					continue;
 
-				idx = get_idx_in_pwr_tbl(k) + core - 1;
+				idx =
+					get_idx_in_pwr_tbl(k) +
+					cobra_lookup_data.limit[k].core - 1;
 
 				if (idx >= TOTAL_CORE_NUM ||
 					i >= DVFS_OPP_NUM ||
 					j >= DVFS_OPP_NUM) {
-					ppm_info("[%p] idx: %d i:%d j:%d core:%d\n",
-						cobra_tbl, idx, i, j, core);
+					ppm_info("[%p] idx:%d i:%d j:%d core:%d\n",
+						cobra_tbl, idx, i, j,
+						cobra_lookup_data.limit[k].core);
 					return 0;
 				}
 
@@ -819,7 +819,7 @@ static unsigned int get_limit_opp_and_budget(void)
 
 static void ppm_cobra_lookup_by_budget(struct seq_file *m)
 {
-	int i, j;
+	unsigned int i, j;
 	unsigned int power;
 
 	seq_puts(m, "\n========================================================\n");

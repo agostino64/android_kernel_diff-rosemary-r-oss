@@ -23,9 +23,8 @@
 #include "mtk_drm_ddp.h"
 #include "mtk_drm_ddp_comp.h"
 #include "mtk_drm_mmp.h"
-#include "mtk_drm_trace.h"
 
-#define MAX_ENTER_IDLE_RSZ_RATIO 300
+#define MAX_ENTER_IDLE_RSZ_RATIO 250
 
 static void mtk_drm_idlemgr_enable_crtc(struct drm_crtc *crtc);
 static void mtk_drm_idlemgr_disable_crtc(struct drm_crtc *crtc);
@@ -57,14 +56,8 @@ static void mtk_drm_vdo_mode_enter_idle(struct drm_crtc *crtc)
 	}
 
 	comp = mtk_ddp_comp_request_output(mtk_crtc);
-	if (comp) {
+	if (comp)
 		mtk_ddp_comp_io_cmd(comp, handle, DSI_VFP_IDLE_MODE, NULL);
-		if (mtk_drm_helper_get_opt(priv->helper_opt, MTK_DRM_OPT_LFR)) {
-			int en = 0;
-
-			mtk_ddp_comp_io_cmd(comp, handle, DSI_LFR_SET, &en);
-		}
-	}
 
 	cmdq_pkt_flush(handle);
 	cmdq_pkt_destroy(handle);
@@ -96,14 +89,8 @@ static void mtk_drm_vdo_mode_leave_idle(struct drm_crtc *crtc)
 	}
 
 	comp = mtk_ddp_comp_request_output(mtk_crtc);
-	if (comp) {
+	if (comp)
 		mtk_ddp_comp_io_cmd(comp, handle, DSI_VFP_DEFAULT_MODE, NULL);
-		if (mtk_drm_helper_get_opt(priv->helper_opt, MTK_DRM_OPT_LFR)) {
-			int en = 1;
-
-			mtk_ddp_comp_io_cmd(comp, handle, DSI_LFR_SET, &en);
-		}
-	}
 
 	cmdq_pkt_flush(handle);
 	cmdq_pkt_destroy(handle);
@@ -131,16 +118,10 @@ static void mtk_drm_idlemgr_enter_idle_nolock(struct drm_crtc *crtc)
 	mode = mtk_dsi_is_cmd_mode(output_comp);
 	CRTC_MMP_EVENT_START(index, enter_idle, mode, 0);
 
-	mtk_drm_trace_c("%d|DISP:idle_enter|%d",
-			hwc_pid, 1);
-
 	if (mode)
 		mtk_drm_cmd_mode_enter_idle(crtc);
 	else
 		mtk_drm_vdo_mode_enter_idle(crtc);
-
-	mtk_drm_trace_c("%d|DISP:idle_enter|%d",
-			hwc_pid, 0);
 
 	CRTC_MMP_EVENT_END(index, enter_idle, mode, 0);
 }
@@ -158,20 +139,12 @@ static void mtk_drm_idlemgr_leave_idle_nolock(struct drm_crtc *crtc)
 		return;
 
 	mode = mtk_dsi_is_cmd_mode(output_comp);
-
-
 	CRTC_MMP_EVENT_START(index, leave_idle, mode, 0);
-
-	mtk_drm_trace_c("%d|DISP:idle_leave|%d",
-			hwc_pid, 1);
 
 	if (mode)
 		mtk_drm_cmd_mode_leave_idle(crtc);
 	else
 		mtk_drm_vdo_mode_leave_idle(crtc);
-
-	mtk_drm_trace_c("%d|DISP:idle_leave|%d",
-			hwc_pid, 0);
 
 	CRTC_MMP_EVENT_END(index, leave_idle, mode, 0);
 }
@@ -205,7 +178,6 @@ void mtk_drm_idlemgr_kick(const char *source, struct drm_crtc *crtc,
 
 	/* update kick timestamp */
 	idlemgr_ctx->idlemgr_last_kick_time = sched_clock();
-	idlemgr_ctx->idle_vblank_check_internal = 0;
 
 	if (idlemgr_ctx->is_idle) {
 		DDPINFO("[LP] kick idle from [%s]\n", source);
@@ -342,6 +314,7 @@ static int mtk_drm_idlemgr_monitor_thread(void *data)
 	struct mtk_crtc_state *mtk_state = NULL;
 	struct drm_vblank_crtc *vblank = NULL;
 	int crtc_id = drm_crtc_index(crtc);
+	static unsigned long long idlemgr_vblank_check_internal;
 
 	msleep(16000);
 	while (1) {
@@ -350,8 +323,8 @@ static int mtk_drm_idlemgr_monitor_thread(void *data)
 			atomic_read(&idlemgr->idlemgr_task_active));
 
 		t_idle = local_clock() - idlemgr_ctx->idlemgr_last_kick_time;
-		if (idlemgr_ctx->idle_vblank_check_internal)
-			t_to_check = idlemgr_ctx->idle_vblank_check_internal *
+		if (idlemgr_vblank_check_internal)
+			t_to_check = idlemgr_vblank_check_internal *
 				1000 * 1000 - t_idle;
 		else
 			t_to_check = idlemgr_ctx->idle_check_interval *
@@ -404,9 +377,9 @@ static int mtk_drm_idlemgr_monitor_thread(void *data)
 		}
 
 		t_idle = local_clock() - idlemgr_ctx->idlemgr_last_kick_time;
-		if ((idlemgr_ctx->idle_vblank_check_internal &&
-		    t_idle < idlemgr_ctx->idle_vblank_check_internal * 1000 * 1000) ||
-		    (!idlemgr_ctx->idle_vblank_check_internal &&
+		if ((idlemgr_vblank_check_internal &&
+		    t_idle < idlemgr_vblank_check_internal * 1000 * 1000) ||
+		    (!idlemgr_vblank_check_internal &&
 		    t_idle < idlemgr_ctx->idle_check_interval * 1000 * 1000)) {
 			/* kicked in idle_check_interval msec, it's not idle */
 			DDP_MUTEX_UNLOCK(&mtk_crtc->lock, __func__, __LINE__);
@@ -422,16 +395,11 @@ static int mtk_drm_idlemgr_monitor_thread(void *data)
 			if (!vblank || atomic_read(&vblank->refcount) == 0) {
 				mtk_drm_idlemgr_enter_idle_nolock(crtc);
 				idlemgr_ctx->is_idle = 1;
-				idlemgr_ctx->idle_vblank_check_internal = 0;
-				if (mtk_crtc->esd_ctx) {
-					atomic_set(&mtk_crtc->esd_ctx->target_time, 1);
-					wake_up_interruptible(
-						&mtk_crtc->esd_ctx->check_task_wq);
-				}
+				idlemgr_vblank_check_internal = 0;
 			} else {
 				idlemgr_ctx->idlemgr_last_kick_time =
 					sched_clock();
-				idlemgr_ctx->idle_vblank_check_internal = 17;
+				idlemgr_vblank_check_internal = 10;
 			}
 		}
 
@@ -478,7 +446,6 @@ int mtk_drm_idlemgr_init(struct drm_crtc *crtc, int index)
 	idlemgr_ctx->idlemgr_last_kick_time = ~(0ULL);
 	idlemgr_ctx->cur_lp_cust_mode = 0;
 	idlemgr_ctx->idle_check_interval = 50;
-	idlemgr_ctx->idle_vblank_check_internal = 0;
 
 	snprintf(name, len, "mtk_drm_disp_idlemgr-%d", index);
 	idlemgr->idlemgr_task =

@@ -22,10 +22,6 @@ struct GPIO_PINCTRL gpio_pinctrl_list_cam[
 	{"rst0"},
 	{"ldo_vcama_1"},
 	{"ldo_vcama_0"},
-#ifdef CONFIG_REGULATOR_RT5133
-	{"ldo_vcama1_1"},
-	{"ldo_vcama1_0"},
-#endif
 	{"ldo_vcamd_1"},
 	{"ldo_vcamd_0"},
 	{"ldo_vcamio_1"},
@@ -41,6 +37,8 @@ struct GPIO_PINCTRL gpio_pinctrl_list_switch[
 	{"cam_mipi_switch_sel_0"}
 };
 #endif
+
+extern void gpio_dump_regs(void);
 
 static struct GPIO gpio_instance;
 
@@ -173,12 +171,21 @@ static enum IMGSENSOR_RETURN gpio_set(
 	return IMGSENSOR_RETURN_SUCCESS;
 }
 
+static enum IMGSENSOR_RETURN gpio_dump(void *pintance)
+{
+	PK_DBG("[sensor_dump][gpio]\n");
+	gpio_dump_regs();
+	PK_DBG("[sensor_dump][gpio] finish\n");
+	return IMGSENSOR_RETURN_SUCCESS;
+}
+
 static struct IMGSENSOR_HW_DEVICE device = {
 	.id        = IMGSENSOR_HW_ID_GPIO,
 	.pinstance = (void *)&gpio_instance,
 	.init      = gpio_init,
 	.set       = gpio_set,
-	.release   = gpio_release
+	.release   = gpio_release,
+	.dump      = gpio_dump
 };
 
 enum IMGSENSOR_RETURN imgsensor_hw_gpio_open(

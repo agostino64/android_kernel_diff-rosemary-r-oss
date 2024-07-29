@@ -38,10 +38,6 @@
 #include "cmdq-sec.h"
 #include "mtk_layer_layout_trace.h"
 #include "mtk_drm_mmp.h"
-#ifdef CONFIG_MTK_SMI_EXT
-#include "smi_public.h"
-#endif
-#include "mtk_drm_crtc.h"
 
 #define REG_FLD(width, shift)                                                  \
 	((unsigned int)((((width)&0xFF) << 16) | ((shift)&0xFF)))
@@ -238,9 +234,7 @@
 #define DISP_REG_OVL_ADDR_MT6885 0x0f40
 #define DISP_REG_OVL_ADDR_MT6873 0x0f40
 #define DISP_REG_OVL_ADDR_MT6853 0x0f40
-#define DISP_REG_OVL_ADDR_MT6877 0x0f40
 #define DISP_REG_OVL_ADDR_MT6833 0x0f40
-#define DISP_REG_OVL_ADDR_MT6781 0x0f40
 #define DISP_REG_OVL_ADDR_MT8173 0x0f40
 #define DISP_REG_OVL_ADDR(module, n) ((module)->data->addr + 0x20 * (n))
 
@@ -293,15 +287,6 @@
 
 #define OVL_SECURE 0xfc0
 #define EXT_SECURE_OFFSET 4
-
-#define OVL_LAYER_DOMAIN 0xfc4
-#define OVL_LAYER_EXT_DOMAIN 0xfc8
-#define OVL_LAYER_Lx_DOMAIN(id)		REG_FLD_MSB_LSB((4 + 8 * id), (0 + 8 * id))
-#define OVL_LAYER_ELx_DOMAIN(id)		REG_FLD_MSB_LSB((4 + 8 * id), (0 + 8 * id))
-
-#ifdef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
-#define OVL_LAYER_SVP_DOMAIN_INDEX  (4)
-#endif
 
 #define OVL_RDMA_DEBUG_OFFSET (0x4)
 
@@ -613,19 +598,10 @@ static irqreturn_t mtk_disp_ovl_irq_handler(int irq, void *dev_id)
 	}
 	if (val & (1 << 2)) {
 		DDPPR_ERR("[IRQ] %s: frame underflow! cnt=%d\n",
-				mtk_dump_comp_str(ovl), priv->underflow_cnt);
-		if ((priv->underflow_cnt % 50) == 0) {
-			if (ovl->mtk_crtc) {
-				mtk_drm_crtc_analysis(&(ovl->mtk_crtc->base));
-				mtk_drm_crtc_dump(&(ovl->mtk_crtc->base));
-			}
-			DDPAEE(" %s: frame underflow! cnt=%d\n",
-				mtk_dump_comp_str(ovl), priv->underflow_cnt);
-#ifdef CONFIG_MTK_SMI_EXT
-			smi_debug_bus_hang_detect_disp(false, "DISP");
-#endif
-		}
+			  mtk_dump_comp_str(ovl), priv->underflow_cnt);
 		priv->underflow_cnt++;
+		mtk_ovl_dump(ovl);
+		mtk_ovl_analysis(ovl);
 	}
 	if (val & (1 << 3))
 		DDPIRQ("[IRQ] %s: sw reset done!\n", mtk_dump_comp_str(ovl));
@@ -734,8 +710,7 @@ static void mtk_ovl_start(struct mtk_ddp_comp *comp, struct cmdq_pkt *handle)
 		       value, mask);
 
 #if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6833) || defined(CONFIG_MACH_MT6877) \
-	|| defined(CONFIG_MACH_MT6781)
+	|| defined(CONFIG_MACH_MT6833)
 	/* Enable feedback real BW consumed from OVL */
 	cmdq_pkt_write(handle, comp->cmdq_base,
 		comp->regs_pa + DISP_REG_OVL_GDRDY_PRD,
@@ -891,12 +866,12 @@ static void mtk_ovl_layer_off(struct mtk_ddp_comp *comp, unsigned int idx,
 }
 
 static unsigned int ovl_fmt_convert(struct mtk_disp_ovl *ovl, unsigned int fmt,
-				    uint64_t modifier, unsigned int compress)
+				    uint64_t modifier)
 {
 	switch (fmt) {
 	default:
 	case DRM_FORMAT_RGB565:
-		return OVL_CON_CLRFMT_RGB565(ovl) | (compress ? OVL_CON_BYTE_SWAP : 0UL);
+		return OVL_CON_CLRFMT_RGB565(ovl);
 	case DRM_FORMAT_BGR565:
 		return (unsigned int)OVL_CON_CLRFMT_RGB565(ovl) |
 		       OVL_CON_BYTE_SWAP;
@@ -1052,13 +1027,13 @@ static u32 *mtk_get_ovl_csc(enum mtk_ovl_colorspace in,
 	static u32 *ovl_csc[OVL_CS_NUM][OVL_CS_NUM];
 	static bool inited;
 
+	if (inited)
+		goto done;
+
 	if (in < 0) {
 		DDPPR_ERR("%s: Invalid ovl colorspace in:%d\n", __func__, in);
 		in = 0;
 	}
-
-	if (inited)
-		goto done;
 
 	ovl_csc[OVL_SRGB][OVL_P3] = sRGB_to_DCI_P3;
 	ovl_csc[OVL_P3][OVL_SRGB] = DCI_P3_to_sRGB;
@@ -1283,9 +1258,6 @@ static void _ovl_common_config(struct mtk_ddp_comp *comp, unsigned int idx,
 	unsigned int clip = 0;
 	unsigned int buf_size = 0;
 	int rotate = 0;
-#ifdef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
-	unsigned int domain_val = 0, domain_mask = 0;
-#endif
 
 	if (fmt == DRM_FORMAT_YUYV || fmt == DRM_FORMAT_YVYU ||
 	    fmt == DRM_FORMAT_UYVY || fmt == DRM_FORMAT_VYUY) {
@@ -1343,47 +1315,26 @@ static void _ovl_common_config(struct mtk_ddp_comp *comp, unsigned int idx,
 				cmdq_sec_pkt_write_reg(handle, regs_addr,
 					pending->addr, meta_type,
 					offset, size, 0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					BIT(id + EXT_SECURE_OFFSET),
 					BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					OVL_LAYER_SVP_DOMAIN_INDEX, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, EL%d set domain(0x%x, 0x%x, 0x%x) set domain, addr:(0x%x+0x%x), size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
+
+				DDPDBG("%s:%d, addr:(%pad,0x%x), size:%d\n",
+					__func__, __LINE__,
 					&pending->addr,
 					offset,
 					size);
-#endif
 			} else {
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					regs_addr, addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
+				DDPDBG("%s:%d, addr:0x%x, size:%d\n",
+					__func__, __LINE__,
+					addr,
+					size);
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					0, BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, EL%d, clear domain(0x%x, 0x%x, 0x%x), addr:0x%x, size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
-					addr,
-					size);
-#endif
 			}
 		} else  {
 #endif
@@ -1391,24 +1342,9 @@ static void _ovl_common_config(struct mtk_ddp_comp *comp, unsigned int idx,
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + DISP_REG_OVL_EL_ADDR(id),
 				addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + OVL_SECURE,
 				0, BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, EL%d(0x%x, 0x%x, 0x%x), clear domain, addr:0x%x, size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
-					addr,
-					0);
-#endif
 #if defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
 		}
 #endif
@@ -1437,72 +1373,29 @@ static void _ovl_common_config(struct mtk_ddp_comp *comp, unsigned int idx,
 				cmdq_sec_pkt_write_reg(handle, regs_addr,
 					pending->addr, meta_type,
 					offset, size, 0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					BIT(lye_idx), BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					OVL_LAYER_SVP_DOMAIN_INDEX, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d set domain(0x%x, 0x%x, 0x%x), addr:(%pad,0x%x), size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
+				DDPDBG("%s:%d, addr:(%pad,0x%x), size:%d\n",
+					__func__, __LINE__,
 					&pending->addr,
 					offset,
 					size);
-#endif
 			} else {
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					regs_addr, addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					0, BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d clear domain(0x%x, 0x%x, 0x%x), addr:(%pad,0x%x), size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					offset,
-					size);
-#endif
 			}
 		} else {
 #endif
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + DISP_REG_OVL_ADDR(ovl, lye_idx),
 				addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + OVL_SECURE,
 				0, BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d clear domain (0x%x, 0x%x, 0x%x), addr:(%pad,0x%x), size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					offset,
-					0);
-#endif
 #if defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
 		}
 #endif
@@ -1579,8 +1472,7 @@ static void mtk_ovl_layer_config(struct mtk_ddp_comp *comp, unsigned int idx,
 	     fmt == DRM_FORMAT_XRGB8888 || fmt == DRM_FORMAT_XBGR8888))
 		alpha_con = 0;
 
-	con = ovl_fmt_convert(ovl, fmt, state->pending.modifier,
-			pending->prop_val[PLANE_PROP_COMPRESS]);
+	con = ovl_fmt_convert(ovl, fmt, state->pending.modifier);
 	con |= (alpha_con << 8) | alpha;
 
 	if (fmt == DRM_FORMAT_UYVY || fmt == DRM_FORMAT_YUYV) {
@@ -1748,9 +1640,6 @@ static bool compr_l_config_PVRIC_V3_1(struct mtk_ddp_comp *comp,
 	unsigned int lx_addr, lx_pitch;
 	unsigned int lx_hdr_addr, lx_hdr_pitch;
 	unsigned int lx_clip, lx_src_size;
-#ifdef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
-	unsigned int domain_val = 0, domain_mask = 0;
-#endif
 
 #ifdef CONFIG_MTK_LCM_PHYSICAL_ROTATION_HW
 	if (drm_crtc_index(&comp->mtk_crtc->base) == 0)
@@ -1872,70 +1761,29 @@ static bool compr_l_config_PVRIC_V3_1(struct mtk_ddp_comp *comp,
 				meta_type = CMDQ_IWC_H_2_MVA;
 				cmdq_sec_pkt_write_reg(handle, regs_addr,
 					pending->addr, meta_type, 0, size, 0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					BIT(id + EXT_SECURE_OFFSET),
 					BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					OVL_LAYER_SVP_DOMAIN_INDEX, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d,EL%d set domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
+				DDPDBG("%s:%d, addr:%pad, size:%d\n",
+					__func__, __LINE__,
 					&pending->addr,
 					size);
-#endif
 			} else {
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					regs_addr, lx_addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					0, BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d,EL%d clear domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					size);
-#endif
 			}
 		} else {
 #endif
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + DISP_REG_OVL_EL_ADDR(id),
 				lx_addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + OVL_SECURE,
 				0, BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d,EL%d clear domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					0);
-#endif
 #if defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
 		}
 #endif
@@ -1968,69 +1816,28 @@ static bool compr_l_config_PVRIC_V3_1(struct mtk_ddp_comp *comp,
 				meta_type = CMDQ_IWC_H_2_MVA;
 				cmdq_sec_pkt_write_reg(handle, regs_addr,
 					pending->addr, meta_type, 0, size, 0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					BIT(lye_idx), BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					OVL_LAYER_SVP_DOMAIN_INDEX, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d set domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
+				DDPDBG("%s:%d, addr:%pad, size:%d\n",
+					__func__, __LINE__,
 					&pending->addr,
 					size);
-#endif
 			} else {
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					regs_addr, lx_addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					0, BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d clear domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					size);
-#endif
 			}
 		} else {
 #endif
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + DISP_REG_OVL_ADDR(ovl, lye_idx),
 				lx_addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + OVL_SECURE,
 				0, BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d clear domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					0);
-#endif
 #if defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
 		}
 #endif
@@ -2098,9 +1905,6 @@ static bool compr_l_config_AFBC_V1_2(struct mtk_ddp_comp *comp,
 	unsigned int lx_clip, lx_src_size;
 	unsigned int lx_2nd_subbuf = 0;
 	unsigned int lx_pitch_msb = 0;
-#ifdef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
-	unsigned int domain_val = 0, domain_mask = 0;
-#endif
 
 	DDPDBG("%s:%d, addr:0x%x, pitch:%d, vpitch:%d\n",
 		__func__, __LINE__, addr,
@@ -2194,12 +1998,8 @@ static bool compr_l_config_AFBC_V1_2(struct mtk_ddp_comp *comp,
 	lx_hdr_pitch = pitch / tile_w / Bpp *
 	    AFBC_V1_2_HEADER_SIZE_PER_TILE_BYTES;
 
-	/* 5. calculate OVL_LX_SRC_SIZE, RGB565 use layout 4, src_h needs align to tile_h*/
-	if (fmt != DRM_FORMAT_RGB565 && fmt != DRM_FORMAT_BGR565) {
-		src_h_align = src_h_half_align;
-		src_y_align = src_y_half_align;
-	}
-	lx_src_size = (src_h_align << 16) | src_w_align;
+	/* 5. calculate OVL_LX_SRC_SIZE */
+	lx_src_size = (src_h_half_align << 16) | src_w_align;
 
 	/* 6. calculate OVL_LX_CLIP */
 	lx_clip = 0;
@@ -2210,12 +2010,12 @@ static bool compr_l_config_AFBC_V1_2(struct mtk_ddp_comp *comp,
 		if (src_x + src_w < src_x_align + src_w_align)
 			lx_clip |= REG_FLD_VAL(OVL_L_CLIP_FLD_LEFT,
 				src_x_align + src_w_align - src_x - src_w);
-		if (src_y > src_y_align)
+		if (src_y > src_y_half_align)
 			lx_clip |= REG_FLD_VAL(OVL_L_CLIP_FLD_BOTTOM,
-				src_y - src_y_align);
-		if (src_y + src_h < src_y_align + src_h_align)
+				src_y - src_y_half_align);
+		if (src_y + src_h < src_y_half_align + src_h_half_align)
 			lx_clip |= REG_FLD_VAL(OVL_L_CLIP_FLD_TOP,
-				src_y_align + src_h_align -
+				src_y_half_align + src_h_half_align -
 				src_y - src_h);
 	} else {
 		if (src_x > src_x_align)
@@ -2224,12 +2024,12 @@ static bool compr_l_config_AFBC_V1_2(struct mtk_ddp_comp *comp,
 		if (src_x + src_w < src_x_align + src_w_align)
 			lx_clip |= REG_FLD_VAL(OVL_L_CLIP_FLD_RIGHT,
 				src_x_align + src_w_align - src_x - src_w);
-		if (src_y > src_y_align)
+		if (src_y > src_y_half_align)
 			lx_clip |= REG_FLD_VAL(OVL_L_CLIP_FLD_TOP,
-				src_y - src_y_align);
-		if (src_y + src_h < src_y_align + src_h_align)
+				src_y - src_y_half_align);
+		if (src_y + src_h < src_y_half_align + src_h_half_align)
 			lx_clip |= REG_FLD_VAL(OVL_L_CLIP_FLD_BOTTOM,
-				src_y_align + src_h_align -
+				src_y_half_align + src_h_half_align -
 				src_y - src_h);
 	}
 
@@ -2238,102 +2038,41 @@ static bool compr_l_config_AFBC_V1_2(struct mtk_ddp_comp *comp,
 	buf_total_size = header_offset + src_buf_tile_num * tile_body_size;
 	if (ext_lye_idx != LYE_NORMAL) {
 		unsigned int id = ext_lye_idx - 1;
-		unsigned int regs_addr, hdr_addr;
-
-		regs_addr = comp->regs_pa +
-			DISP_REG_OVL_EL_ADDR(id);
-		hdr_addr = comp->regs_pa +
-			DISP_REG_OVL_ELX_HDR_ADDR(id);
 
 #if defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
-		if (comp->mtk_crtc->sec_on && state->pending.is_sec) {
-			u32 size, meta_type;
-			u32 addr_offset;
+		if (comp->mtk_crtc->sec_on) {
+			u32 size, meta_type, regs_addr;
 
 			regs_addr = comp->regs_pa +
 				DISP_REG_OVL_EL_ADDR(id);
 			if (state->pending.is_sec && pending->addr) {
 				size = buf_size;
 				meta_type = CMDQ_IWC_H_2_MVA;
-				addr_offset = header_offset + tile_offset *
-						tile_body_size;
 				cmdq_sec_pkt_write_reg(handle, regs_addr,
-					pending->addr, meta_type, addr_offset,
-					size, 0);
-				addr_offset = tile_offset *
-						AFBC_V1_2_HEADER_SIZE_PER_TILE_BYTES;
-				cmdq_sec_pkt_write_reg(handle, hdr_addr,
-						pending->addr, meta_type, addr_offset,
-						size, 0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
+					pending->addr, meta_type, 0, size, 0);
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					BIT(id + EXT_SECURE_OFFSET),
 					BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					OVL_LAYER_SVP_DOMAIN_INDEX, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, EL%d set domain(0x%x, 0x%x, 0x%x), addr:%pad, size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
+				DDPDBG("%s:%d, addr:%pad, size:%d\n",
+					__func__, __LINE__,
 					&pending->addr,
 					size);
-#endif
 			} else {
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					regs_addr, lx_addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					0, BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, EL%d clear domain(0x%x, 0x%x, 0x%x), addr:%pad, size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					size);
-#endif
-				cmdq_pkt_write(handle, comp->cmdq_base,
-						hdr_addr, lx_hdr_addr, ~0);
 			}
 		} else {
 #endif
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + DISP_REG_OVL_EL_ADDR(id),
 				lx_addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + OVL_SECURE,
 				0, BIT(id + EXT_SECURE_OFFSET));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_ELx_DOMAIN(id));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, EL%d clear domain(0x%x, 0x%x, 0x%x), addr:%pad, size:%d\n",
-					__func__, __LINE__, id,
-					comp->regs_pa + OVL_LAYER_EXT_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					0);
-#endif
-			cmdq_pkt_write(handle, comp->cmdq_base,
-				hdr_addr, lx_hdr_addr, ~0);
-
 #if defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
 		}
 #endif
@@ -2355,100 +2094,46 @@ static bool compr_l_config_AFBC_V1_2(struct mtk_ddp_comp *comp,
 			lx_clip, ~0);
 		cmdq_pkt_write(handle, comp->cmdq_base,
 			comp->regs_pa +
+			DISP_REG_OVL_ELX_HDR_ADDR(id),
+			lx_hdr_addr, ~0);
+		cmdq_pkt_write(handle, comp->cmdq_base,
+			comp->regs_pa +
 			DISP_REG_OVL_ELX_HDR_PITCH(id),
 			lx_hdr_pitch, ~0);
 	} else {
-		unsigned int regs_addr, hdr_addr;
-
-		regs_addr = comp->regs_pa +
-			DISP_REG_OVL_ADDR(ovl, lye_idx);
-		hdr_addr = comp->regs_pa +
-			DISP_REG_OVL_LX_HDR_ADDR(lye_idx);
 #if defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
-		if (comp->mtk_crtc->sec_on && state->pending.is_sec) {
-			u32 size, meta_type, addr_offset;
+		if (comp->mtk_crtc->sec_on) {
+			u32 size, meta_type, regs_addr;
 
 			regs_addr = comp->regs_pa +
 				DISP_REG_OVL_ADDR(ovl, lye_idx);
 			if (state->pending.is_sec && pending->addr) {
 				size = buf_size;
 				meta_type = CMDQ_IWC_H_2_MVA;
-				addr_offset = header_offset + tile_offset *
-						tile_body_size;
 				cmdq_sec_pkt_write_reg(handle, regs_addr,
-					pending->addr, meta_type, addr_offset, size, 0);
-				addr_offset = tile_offset *
-						AFBC_V1_2_HEADER_SIZE_PER_TILE_BYTES;
-				cmdq_sec_pkt_write_reg(handle, hdr_addr,
-					pending->addr, meta_type, addr_offset, size, 0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
+					pending->addr, meta_type, 0, size, 0);
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					BIT(lye_idx), BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					OVL_LAYER_SVP_DOMAIN_INDEX, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d set domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
+				DDPDBG("%s:%d, addr:%pad, size:%d\n",
+					__func__, __LINE__,
 					&pending->addr,
 					size);
-#endif
 			} else {
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					regs_addr, lx_addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 				cmdq_pkt_write(handle, comp->cmdq_base,
 					comp->regs_pa + OVL_SECURE,
 					0, BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d clear domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					size);
-#endif
-				cmdq_pkt_write(handle, comp->cmdq_base, hdr_addr,
-						lx_hdr_addr, ~0);
 			}
 		} else {
 #endif
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + DISP_REG_OVL_ADDR(ovl, lye_idx),
 				lx_addr, ~0);
-#ifndef CONFIG_MTK_SVP_ON_MTEE_SUPPORT
 			cmdq_pkt_write(handle, comp->cmdq_base,
 				comp->regs_pa + OVL_SECURE,
 				0, BIT(lye_idx));
-#else
-				SET_VAL_MASK(domain_val, domain_mask,
-					0, OVL_LAYER_Lx_DOMAIN(lye_idx));
-				cmdq_pkt_write(handle, comp->cmdq_base,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask);
-				DDPINFO(
-					"%s:%d, L%d clear domain(0x%x, 0x%x, 0x%x) addr:%pad, size:%d\n",
-					__func__, __LINE__, lye_idx,
-					comp->regs_pa + OVL_LAYER_DOMAIN,
-					domain_val, domain_mask,
-					&pending->addr,
-					0);
-#endif
-			cmdq_pkt_write(handle, comp->cmdq_base,
-				hdr_addr, lx_hdr_addr, ~0);
-
 #if defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
 		}
 #endif
@@ -2464,6 +2149,9 @@ static bool compr_l_config_AFBC_V1_2(struct mtk_ddp_comp *comp,
 		cmdq_pkt_write(handle, comp->cmdq_base,
 			comp->regs_pa + DISP_REG_OVL_CLIP(lye_idx),
 			lx_clip, ~0);
+		cmdq_pkt_write(handle, comp->cmdq_base,
+			comp->regs_pa + DISP_REG_OVL_LX_HDR_ADDR(lye_idx),
+			lx_hdr_addr, ~0);
 		cmdq_pkt_write(handle, comp->cmdq_base,
 			comp->regs_pa + DISP_REG_OVL_LX_HDR_PITCH(lye_idx),
 			lx_hdr_pitch, ~0);
@@ -2623,8 +2311,7 @@ void mtk_ovl_cal_golden_setting(struct mtk_ddp_config *cfg, unsigned int *gs)
 #endif
 
 #if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6833) || defined(CONFIG_MACH_MT6877) \
-	|| defined(CONFIG_MACH_MT6781)
+	|| defined(CONFIG_MACH_MT6833)
 	/* OVL_RDMA_MEM_GMC_SETTING_1 */
 	gs[GS_OVL_RDMA_ULTRA_TH] = 0x3ff;
 	gs[GS_OVL_RDMA_PRE_ULTRA_TH] = (!is_dc) ? 0x3ff : 0xe0;
@@ -2997,20 +2684,12 @@ static int mtk_ovl_io_cmd(struct mtk_ddp_comp *comp, struct cmdq_pkt *handle,
 	}
 	case BACKUP_OVL_STATUS: {
 		struct mtk_drm_crtc *mtk_crtc = comp->mtk_crtc;
-		struct cmdq_pkt_buffer *cmdq_buf = NULL;
-		dma_addr_t slot;
+		struct cmdq_pkt_buffer *cmdq_buf = &(mtk_crtc->gce_obj.buf);
+		dma_addr_t slot = cmdq_buf->pa_base + DISP_SLOT_OVL_STATUS;
 
-		DDPDBG("%s,+BACKUP_OVL_STATUS\n", __func__);
-		if (mtk_crtc) {
-			cmdq_buf = &(mtk_crtc->gce_obj.buf);
-			if (cmdq_buf) {
-				slot = cmdq_buf->pa_base + DISP_SLOT_OVL_STATUS;
-
-				cmdq_pkt_mem_move(handle, comp->cmdq_base,
-					comp->regs_pa + DISP_REG_OVL_STA,
-					slot, CMDQ_THR_SPR_IDX3);
-			}
-		}
+		cmdq_pkt_mem_move(handle, comp->cmdq_base,
+			comp->regs_pa + DISP_REG_OVL_STA,
+			slot, CMDQ_THR_SPR_IDX3);
 		break;
 	}
 	default:
@@ -3396,8 +3075,7 @@ static void ovl_dump_layer_info(struct mtk_ddp_comp *comp, int layer,
 			(DISP_REG_OVL_EL_ADDR(0) - DISP_REG_OVL_ADDR_MT6885);
 #endif
 #if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6833) || defined(CONFIG_MACH_MT6877) \
-	|| defined(CONFIG_MACH_MT6781)
+	|| defined(CONFIG_MACH_MT6833)
 		Lx_addr_base +=
 			(DISP_REG_OVL_EL_ADDR(0) - DISP_REG_OVL_ADDR_MT6873);
 #endif
@@ -3414,9 +3092,8 @@ static void ovl_dump_layer_info(struct mtk_ddp_comp *comp, int layer,
 	addr = readl(DISP_REG_OVL_ADDR_MT6885 + Lx_addr_base);
 #endif
 #if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6833) || defined(CONFIG_MACH_MT6877) \
-	 || defined(CONFIG_MACH_MT6781)
-	 addr = readl(DISP_REG_OVL_ADDR_MT6873 + Lx_addr_base);
+	|| defined(CONFIG_MACH_MT6833)
+	addr = readl(DISP_REG_OVL_ADDR_MT6873 + Lx_addr_base);
 #endif
 	clip = readl(DISP_REG_OVL_CLIP(0) + Lx_base);
 
@@ -3519,18 +3196,12 @@ int mtk_ovl_analysis(struct mtk_ddp_comp *comp)
 
 static void mtk_ovl_prepare(struct mtk_ddp_comp *comp)
 {
-	struct mtk_disp_ovl *priv = NULL;
+	struct mtk_disp_ovl *priv = dev_get_drvdata(comp->dev);
 	int ret;
 #if defined(CONFIG_DRM_MTK_SHADOW_REGISTER_SUPPORT)
 	struct mtk_disp_ovl *ovl = comp_to_ovl(comp);
 #endif
 	struct mtk_drm_private *dev_priv = NULL;
-
-	if (comp == NULL) {
-		DDPPR_ERR("mtk_ddp_comp is NULL\n");
-		return;
-	}
-	priv = dev_get_drvdata(comp->dev);
 
 	mtk_ddp_comp_clk_prepare(comp);
 
@@ -3552,18 +3223,16 @@ static void mtk_ovl_prepare(struct mtk_ddp_comp *comp)
 			DISP_REG_OVL_EN, DISP_OVL_BYPASS_SHADOW);
 	}
 #else
-#if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6877) || defined(CONFIG_MACH_MT6781)
+#if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853)
 	/* Bypass shadow register and read shadow register */
 	mtk_ddp_write_mask_cpu(comp, DISP_OVL_BYPASS_SHADOW,
 		DISP_REG_OVL_EN, DISP_OVL_BYPASS_SHADOW);
 #endif
 #endif
-	if (comp && comp->mtk_crtc) {
-		dev_priv = comp->mtk_crtc->base.dev->dev_private;
-		if (mtk_drm_helper_get_opt(dev_priv->helper_opt, MTK_DRM_OPT_LAYER_REC))
-			writel(0xffffffff, comp->regs + DISP_OVL_REG_GDRDY_PRD);
-	}
+
+	dev_priv = comp->mtk_crtc->base.dev->dev_private;
+	if (mtk_drm_helper_get_opt(dev_priv->helper_opt, MTK_DRM_OPT_LAYER_REC))
+		writel(0xffffffff, comp->regs + DISP_OVL_REG_GDRDY_PRD);
 }
 
 static void mtk_ovl_unprepare(struct mtk_ddp_comp *comp)
@@ -3888,20 +3557,6 @@ static const struct mtk_disp_ovl_data mt6853_ovl_driver_data = {
 	.support_shadow = false,
 };
 
-static const struct compress_info compr_info_mt6877  = {
-	.name = "AFBC_V1_2_MTK_1",
-	.l_config = &compr_l_config_AFBC_V1_2,
-};
-
-static const struct mtk_disp_ovl_data mt6877_ovl_driver_data = {
-	.addr = DISP_REG_OVL_ADDR_MT6877,
-	.fmt_rgb565_is_0 = true,
-	.fmt_uyvy = 4U << 12,
-	.fmt_yuyv = 5U << 12,
-	.compr_info = &compr_info_mt6877,
-	.support_shadow = false,
-};
-
 static const struct compress_info compr_info_mt6833  = {
 	.name = "AFBC_V1_2_MTK_1",
 	.l_config = &compr_l_config_AFBC_V1_2,
@@ -3913,20 +3568,6 @@ static const struct mtk_disp_ovl_data mt6833_ovl_driver_data = {
 	.fmt_uyvy = 4U << 12,
 	.fmt_yuyv = 5U << 12,
 	.compr_info = &compr_info_mt6833,
-	.support_shadow = false,
-};
-
-static const struct compress_info compr_info_mt6781  = {
-	.name = "AFBC_V1_2_MTK_1",
-	.l_config = &compr_l_config_AFBC_V1_2,
-};
-
-static const struct mtk_disp_ovl_data mt6781_ovl_driver_data = {
-	.addr = DISP_REG_OVL_ADDR_MT6781,
-	.fmt_rgb565_is_0 = true,
-	.fmt_uyvy = 4U << 12,
-	.fmt_yuyv = 5U << 12,
-	.compr_info = &compr_info_mt6781,
 	.support_shadow = false,
 };
 
@@ -3951,12 +3592,8 @@ static const struct of_device_id mtk_disp_ovl_driver_dt_match[] = {
 	 .data = &mt6873_ovl_driver_data},
 	{.compatible = "mediatek,mt6853-disp-ovl",
 	 .data = &mt6853_ovl_driver_data},
-	{.compatible = "mediatek,mt6877-disp-ovl",
-	 .data = &mt6877_ovl_driver_data},
 	{.compatible = "mediatek,mt6833-disp-ovl",
 	 .data = &mt6833_ovl_driver_data},
-	{.compatible = "mediatek,mt6781-disp-ovl",
-	 .data = &mt6781_ovl_driver_data},
 	{},
 };
 MODULE_DEVICE_TABLE(of, mtk_disp_ovl_driver_dt_match);

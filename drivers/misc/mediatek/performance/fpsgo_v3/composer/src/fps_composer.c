@@ -36,7 +36,6 @@
 #include "fstb.h"
 #include "xgf.h"
 #include "gbe2.h"
-#include "uboost.h"
 
 /*#define FPSGO_COM_DEBUG*/
 
@@ -191,10 +190,8 @@ static int fpsgo_com_refetch_buffer(struct render_info *f_render, int pid,
 
 	f_render->buffer_id = buffer_id;
 	f_render->queue_SF = queue_SF;
-	if (!f_render->pLoading || !f_render->p_blc) {
+	if (!f_render->pLoading || !f_render->p_blc)
 		fpsgo_base2fbt_node_init(f_render);
-		fpsgo_base2uboost_init(f_render);
-	}
 
 	FPSGO_COM_TRACE("%s: refetch %d: %llu, %llu, %d\n", __func__,
 				pid, identifier, buffer_id, queue_SF);
@@ -237,28 +234,33 @@ void fpsgo_ctrl2comp_enqueue_start(int pid,
 	if (!f_render->api && identifier) {
 		ret = fpsgo_com_refetch_buffer(f_render, pid, identifier, 1);
 		if (!ret) {
-			goto exit;
+			fpsgo_render_tree_unlock(__func__);
+			fpsgo_thread_unlock(&f_render->thr_mlock);
 			return;
 		}
 
 		ret = fpsgo_com_update_render_api_info(f_render);
 		if (!ret) {
-			goto exit;
+			fpsgo_render_tree_unlock(__func__);
+			fpsgo_thread_unlock(&f_render->thr_mlock);
 			return;
 		}
 	} else if (identifier) {
 		ret = fpsgo_com_refetch_buffer(f_render, pid, identifier, 1);
 		if (!ret) {
-			goto exit;
+			fpsgo_render_tree_unlock(__func__);
+			fpsgo_thread_unlock(&f_render->thr_mlock);
 			return;
 		}
 	}
+
+	fpsgo_render_tree_unlock(__func__);
 
 	if (f_render->api == NATIVE_WINDOW_API_CAMERA)
 		fpsgo_comp2fstb_camera_active(pid);
 
 	if (!f_render->queue_SF) {
-		goto exit;
+		fpsgo_thread_unlock(&f_render->thr_mlock);
 		return;
 	}
 
@@ -287,9 +289,7 @@ void fpsgo_ctrl2comp_enqueue_start(int pid,
 			pid, f_render->frame_type);
 		break;
 	}
-exit:
 	fpsgo_thread_unlock(&f_render->thr_mlock);
-	fpsgo_render_tree_unlock(__func__);
 }
 
 void fpsgo_ctrl2comp_enqueue_end(int pid,
@@ -297,7 +297,6 @@ void fpsgo_ctrl2comp_enqueue_end(int pid,
 	unsigned long long identifier)
 {
 	struct render_info *f_render;
-	struct hwui_info *h_info;
 	int xgf_ret = 0;
 	int check_render;
 	unsigned long long running_time = 0;
@@ -327,21 +326,15 @@ void fpsgo_ctrl2comp_enqueue_end(int pid,
 
 	ret = fpsgo_com_refetch_buffer(f_render, pid, identifier, 0);
 	if (!ret) {
-		goto exit;
+		fpsgo_render_tree_unlock(__func__);
+		fpsgo_thread_unlock(&f_render->thr_mlock);
 		return;
 	}
 
-	/* hwui */
-	if (!f_render->hwui) {
-		h_info = fpsgo_search_and_add_hwui_info(f_render->pid, 0);
-		if (h_info)
-			f_render->hwui = 1;
-		else
-			f_render->hwui = 2;
-	}
+	fpsgo_render_tree_unlock(__func__);
 
 	if (!f_render->queue_SF) {
-		goto exit;
+		fpsgo_thread_unlock(&f_render->thr_mlock);
 		return;
 	}
 
@@ -386,9 +379,8 @@ void fpsgo_ctrl2comp_enqueue_end(int pid,
 			pid, f_render->frame_type);
 		break;
 	}
-exit:
 	fpsgo_thread_unlock(&f_render->thr_mlock);
-	fpsgo_render_tree_unlock(__func__);
+
 }
 
 void fpsgo_ctrl2comp_dequeue_start(int pid,
@@ -439,12 +431,15 @@ void fpsgo_ctrl2comp_dequeue_start(int pid,
 
 	ret = fpsgo_com_refetch_buffer(f_render, pid, identifier, 0);
 	if (!ret) {
-		goto exit;
+		fpsgo_render_tree_unlock(__func__);
+		fpsgo_thread_unlock(&f_render->thr_mlock);
 		return;
 	}
 
+	fpsgo_render_tree_unlock(__func__);
+
 	if (!f_render->queue_SF) {
-		goto exit;
+		fpsgo_thread_unlock(&f_render->thr_mlock);
 		return;
 	}
 
@@ -465,9 +460,7 @@ void fpsgo_ctrl2comp_dequeue_start(int pid,
 			pid, f_render->frame_type);
 		break;
 	}
-exit:
 	fpsgo_thread_unlock(&f_render->thr_mlock);
-	fpsgo_render_tree_unlock(__func__);
 
 }
 
@@ -513,12 +506,15 @@ void fpsgo_ctrl2comp_dequeue_end(int pid,
 
 	ret = fpsgo_com_refetch_buffer(f_render, pid, identifier, 0);
 	if (!ret) {
-		goto exit;
+		fpsgo_render_tree_unlock(__func__);
+		fpsgo_thread_unlock(&f_render->thr_mlock);
 		return;
 	}
 
+	fpsgo_render_tree_unlock(__func__);
+
 	if (!f_render->queue_SF) {
-		goto exit;
+		fpsgo_thread_unlock(&f_render->thr_mlock);
 		return;
 	}
 
@@ -545,9 +541,8 @@ void fpsgo_ctrl2comp_dequeue_end(int pid,
 			pid, f_render->frame_type);
 		break;
 	}
-exit:
 	fpsgo_thread_unlock(&f_render->thr_mlock);
-	fpsgo_render_tree_unlock(__func__);
+
 }
 
 void fpsgo_ctrl2comp_connect_api(int pid, int api,

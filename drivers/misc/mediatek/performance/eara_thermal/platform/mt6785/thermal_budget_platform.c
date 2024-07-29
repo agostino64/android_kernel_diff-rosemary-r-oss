@@ -16,7 +16,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include "mtk_gpufreq.h"
-#include "thermal_internal.h"
+#include "thermal_budget.h"
 
 #if defined(CONFIG_MTK_VPU_SUPPORT)
 #include "vpu_dvfs.h"

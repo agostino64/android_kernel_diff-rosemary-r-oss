@@ -1659,121 +1659,97 @@ int check_disp_info(struct disp_layer_info *disp_info)
 	return 0;
 }
 
+static int _copy_layer_info_from_disp(struct disp_layer_info *disp_info_user,
+	int debug_mode, int disp_idx)
+{
+	struct disp_layer_info *l_info = &layering_info;
+	unsigned long int layer_size = 0;
+	int ret = 0, layer_num = 0;
+
+	if (l_info->layer_num[disp_idx] <= 0)
+		return -EFAULT;
+
+
+	layer_num = l_info->layer_num[disp_idx];
+	layer_size = sizeof(struct layer_config) * layer_num;
+	l_info->input_config[disp_idx] =
+		kzalloc(layer_size, GFP_KERNEL);
+
+	if (l_info->input_config[disp_idx] == NULL) {
+		pr_info("[DISP][HRT]:alloc input config 0 fail, layer_num:%d\n",
+			l_info->layer_num[disp_idx]);
+		return -EFAULT;
+	}
+
+	if (debug_mode) {
+		memcpy(l_info->input_config[disp_idx],
+			disp_info_user->input_config[disp_idx],
+			layer_size);
+	} else {
+		if (copy_from_user(l_info->input_config[disp_idx],
+				disp_info_user->input_config[disp_idx],
+				layer_size)) {
+			pr_info("[DISP][FB]: copy_from_user failed! line:%d\n",
+				__LINE__);
+			return -EFAULT;
+		}
+	}
+
+	return ret;
+}
+
 int set_disp_info(struct disp_layer_info *disp_info_user, int debug_mode)
 {
-
 	memcpy(&layering_info, disp_info_user, sizeof(struct disp_layer_info));
 
-	if (layering_info.layer_num[0]) {
-		layering_info.input_config[0] =
-			kcalloc(layering_info.layer_num[0],
-				sizeof(struct layer_config), GFP_KERNEL);
-
-		if (layering_info.input_config[0] == NULL) {
-			pr_info("[DISP][%s #%d]ERROR:[HRT]:alloc input config 0 fail,layer_num:%d\n",
-				__func__, __LINE__,
-				layering_info.layer_num[0]);
-			return -EFAULT;
-		}
-
-		if (debug_mode) {
-			memcpy(layering_info.input_config[0],
-				disp_info_user->input_config[0],
-				sizeof(struct layer_config)
-				* layering_info.layer_num[0]);
-		} else {
-			if (copy_from_user(layering_info.input_config[0],
-				disp_info_user->input_config[0],
-				sizeof(struct layer_config)
-				* layering_info.layer_num[0])) {
-				DISPERR("[FB]:copy_from_user failed!line:%d\n",
-					__LINE__);
-				return -EFAULT;
-			}
-		}
-	}
-
-	if (layering_info.layer_num[1]) {
-		layering_info.input_config[1] =
-			kcalloc(layering_info.layer_num[1],
-				sizeof(struct layer_config),
-				GFP_KERNEL);
-		if (layering_info.input_config[1] == NULL) {
-			pr_info("[DISP][%s #%d]ERROR:[HRT]: alloc input config 1 fail, layer_num:%d\n",
-				__func__, __LINE__,
-				layering_info.layer_num[1]);
-			return -EFAULT;
-		}
-
-		if (debug_mode) {
-			memcpy(layering_info.input_config[1],
-				disp_info_user->input_config[1],
-				sizeof(struct layer_config)
-				* layering_info.layer_num[1]);
-		} else {
-			if (copy_from_user(layering_info.input_config[1],
-				disp_info_user->input_config[1],
-				sizeof(struct layer_config)
-				* layering_info.layer_num[1])) {
-				pr_info("[DISP][%s #%d]ERROR:[FB]: copy_from_user failed! line:%d\n",
-					__func__, __LINE__, __LINE__);
-				return -EFAULT;
-			}
-		}
-	}
+	_copy_layer_info_from_disp(disp_info_user, debug_mode, 0);
+	_copy_layer_info_from_disp(disp_info_user, debug_mode, 1);
 
 	l_rule_info->disp_path = HRT_PATH_UNKNOWN;
 	return 0;
+}
+
+static int _copy_layer_info_by_disp(struct disp_layer_info *disp_info_user,
+	int debug_mode, int disp_idx)
+{
+	struct disp_layer_info *l_info = &layering_info;
+	unsigned long int layer_size = 0;
+	int ret = 0;
+
+	if (l_info->layer_num[disp_idx] <= 0)
+		return -EFAULT;
+
+	disp_info_user->gles_head[disp_idx] = l_info->gles_head[disp_idx];
+	disp_info_user->gles_tail[disp_idx] = l_info->gles_tail[disp_idx];
+
+	layer_size = sizeof(struct layer_config) *
+		disp_info_user->layer_num[disp_idx];
+
+	if (debug_mode) {
+		memcpy(disp_info_user->input_config[disp_idx],
+			l_info->input_config[disp_idx], layer_size);
+	} else {
+		if (copy_to_user(disp_info_user->input_config[disp_idx],
+				l_info->input_config[disp_idx], layer_size)) {
+			pr_info("[DISP][FB]: copy_to_user failed! line:%d\n",
+				__LINE__);
+			ret = -EFAULT;
+		}
+		kfree(l_info->input_config[disp_idx]);
+	}
+
+	return ret;
 }
 
 int copy_layer_info_to_user(struct disp_layer_info *disp_info_user,
 	int debug_mode)
 {
 	int ret = 0;
+	struct disp_layer_info *l_info = &layering_info;
 
-	disp_info_user->hrt_num = layering_info.hrt_num;
-	if (layering_info.layer_num[0] > 0) {
-		disp_info_user->gles_head[0] = layering_info.gles_head[0];
-		disp_info_user->gles_tail[0] = layering_info.gles_tail[0];
-
-		if (debug_mode) {
-			memcpy(disp_info_user->input_config[0],
-				layering_info.input_config[0],
-				sizeof(struct layer_config)
-				* disp_info_user->layer_num[0]);
-		} else {
-			if (copy_to_user(disp_info_user->input_config[0],
-				layering_info.input_config[0],
-				sizeof(struct layer_config)
-				* layering_info.layer_num[0])) {
-				DISPERR("[FB]: copy_to_user failed! line:%d\n",
-				__LINE__);
-				ret = -EFAULT;
-			}
-			kfree(layering_info.input_config[0]);
-		}
-	}
-
-	if (layering_info.layer_num[1] > 0) {
-		disp_info_user->gles_head[1] = layering_info.gles_head[1];
-		disp_info_user->gles_tail[1] = layering_info.gles_tail[1];
-		if (debug_mode) {
-			memcpy(disp_info_user->input_config[1],
-				layering_info.input_config[1],
-				sizeof(struct layer_config)
-				* disp_info_user->layer_num[1]);
-		} else {
-			if (copy_to_user(disp_info_user->input_config[1],
-				layering_info.input_config[1],
-				sizeof(struct layer_config) *
-				layering_info.layer_num[1])) {
-				DISPERR("[FB]: copy_to_user failed! line:%d\n",
-					__LINE__);
-				ret = -EFAULT;
-			}
-			kfree(layering_info.input_config[1]);
-		}
-	}
+	disp_info_user->hrt_num = l_info->hrt_num;
+	_copy_layer_info_by_disp(disp_info_user, debug_mode, 0);
+	_copy_layer_info_by_disp(disp_info_user, debug_mode, 1);
 
 	return ret;
 }
@@ -1968,6 +1944,8 @@ static char *parse_hrt_data_value(char *start, long int *value)
 	int ret;
 
 	tok_start = strchr(start + 1, ']');
+	if (unlikely(!tok_start))
+		goto out;
 	tok_end = strchr(tok_start + 1, '[');
 	if (tok_end)
 		*tok_end = 0;
@@ -1975,7 +1953,7 @@ static char *parse_hrt_data_value(char *start, long int *value)
 	if (ret)
 		DISPWARN("Parsing error gles_num:%d, p:%s, ret:%d\n",
 			(int)*value, tok_start + 1, ret);
-
+out:
 	return tok_end;
 }
 
@@ -2048,13 +2026,19 @@ static int load_hrt_test_data(struct disp_layer_info *disp_info)
 			if (!tok)
 				goto end;
 			tok = parse_hrt_data_value(tok, &disp_id);
+			if (!tok)
+				goto end;
 			for (i = 0 ; i < HRT_LAYER_DATA_NUM ; i++) {
 				tok = parse_hrt_data_value(tok, &tmp_info);
+				if (!tok)
+					goto end;
 				debug_set_layer_data(disp_info,
 					disp_id, i, tmp_info);
 			}
 		} else if (strncmp(line_buf, "[test_start]", 12) == 0) {
 			tok = parse_hrt_data_value(line_buf, &test_case);
+			if (!tok)
+				goto end;
 			layering_rule_start(disp_info, 1);
 			is_test_pass = true;
 		} else if (strncmp(line_buf, "[test_end]", 10) == 0) {
@@ -2093,6 +2077,8 @@ static int load_hrt_test_data(struct disp_layer_info *disp_info)
 			if (!tok)
 				goto end;
 			tok = parse_hrt_data_value(tok, &layer_result);
+			if (!tok)
+				goto end;
 			if (layer_result != tmp_config.ext_sel_layer) {
 				pr_info("[DISP][%s #%d]warn:Test case:%d, ext_sel_layer incorrect, real is %d, expect is %d\n",
 					__func__, __LINE__,

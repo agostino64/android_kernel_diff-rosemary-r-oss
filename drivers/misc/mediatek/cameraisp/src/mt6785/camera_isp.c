@@ -1941,7 +1941,7 @@ static int ISP_WriteReg(struct ISP_REG_IO_STRUCT *pRegIo)
 	int Ret = 0;
 	struct ISP_REG_STRUCT *pData = NULL;
 
-	if ((pRegIo->Count * sizeof(struct ISP_REG_STRUCT)) > 0xFFFFF000) {
+	if (pRegIo->Count > 0xFFFFFFFF) {
 		LOG_NOTICE("pRegIo->Count error");
 		Ret = -EFAULT;
 		goto EXIT;
@@ -3769,7 +3769,7 @@ static long ISP_ioctl(struct file *pFile,
 	case ISP_GET_CUR_ISP_CLOCK:
 		{
 			struct ISP_GET_CLK_INFO getclk;
-			unsigned int clk[2];
+			unsigned int clk[2] = {0, 0};
 
 			ISP_SetPMQOS(E_CLK_CUR, ISP_IRQ_TYPE_INT_CAM_A_ST, clk);
 			getclk.curClk = clk[0];

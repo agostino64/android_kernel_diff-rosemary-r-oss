@@ -64,6 +64,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_CS4349 if I2C
 	select SND_SOC_CS47L24 if MFD_CS47L24
 	select SND_SOC_CS53L30 if I2C
+	select SND_SOC_CS35L41_SPI if SPI_MASTER
 	select SND_SOC_CX20442 if TTY
 	select SND_SOC_DA7210 if SND_SOC_I2C_AND_SPI
 	select SND_SOC_DA7213 if I2C
@@ -103,7 +104,6 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_ML26124 if I2C
 	select SND_SOC_MT6358
 	select SND_SOC_MT6359
-	select SND_SOC_MT6366
 	select SND_SOC_NAU8540 if I2C
 	select SND_SOC_NAU8810 if I2C
 	select SND_SOC_NAU8824 if I2C
@@ -222,7 +222,6 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_WM9712 if SND_SOC_AC97_BUS
 	select SND_SOC_WM9713 if SND_SOC_AC97_BUS
 	select SND_SOC_RT5509 if I2C
-	select SND_SOC_RT5512 if I2C
 	select SND_SOC_MT6660 if I2C
 	select SND_SOC_TFA9874 if I2C
         help
@@ -264,10 +263,12 @@ config SND_SOC_WM_ADSP
 	default y if SND_SOC_WM5102=y
 	default y if SND_SOC_WM5110=y
 	default y if SND_SOC_WM2200=y
+	default y if SND_SOC_CS35L41=y
 	default m if SND_SOC_CS47L24=m
 	default m if SND_SOC_WM5102=m
 	default m if SND_SOC_WM5110=m
 	default m if SND_SOC_WM2200=m
+	default m if SND_SOC_CS35L41=m
 
 config SND_SOC_AB8500_CODEC
 	tristate
@@ -430,6 +431,13 @@ config SND_SOC_CS35L34
 config SND_SOC_CS35L35
 	tristate "Cirrus Logic CS35L35 CODEC"
 	depends on I2C
+config SND_SOC_CS35L41
+	tristate "Cirrus Logic CS35L41 CODEC"
+
+config SND_SOC_CS35L41_SPI
+	tristate "Cirrus Logic CS35L41 CODEC (SPI)"
+	select SND_SOC_CS35L41
+	select REGMAP_SPI
 
 config SND_SOC_CS42L42
 	tristate "Cirrus Logic CS42L42 CODEC"
@@ -1167,8 +1175,9 @@ config SND_SOC_ZX_AUD96P22
 config SND_SOC_MT6660
 	tristate "Mediatek MT6660 speaker amplifier"
 	depends on I2C
-	select RT_REGMAP
-	select SND_RICHTEK_SPM
+	select CRC32
+	select CRYPTO_SHA256
+	select CRYPTO_RSA
 	help
 	  Config of MT6660. It is a Smart power
 	  amplifier which contain speaker protection,
@@ -1192,14 +1201,6 @@ config SND_SOC_AW87339
 	  PMIC device which has no speaker protection
 	  function.
 
-config SND_SOC_SIA8109
-	tristate "SoC Audio for SIA8109 speaker amplifier"
-	depends on I2C
-	help
-	  This option enables support for SIA8109 speaker
-	  amplifier. It is a speaker which connect with MTK
-	  PMIC device which has no speaker protection.
-
 config SND_SOC_LM4857
 	tristate
 
@@ -1219,9 +1220,6 @@ config SND_SOC_MT6358
 	tristate
 
 config SND_SOC_MT6359
-	tristate
-
-config SND_SOC_MT6366
 	tristate
 
 config SND_SOC_MT6392_CODEC
@@ -1251,22 +1249,7 @@ config SND_SOC_RT5509
 	depends on I2C
 	select RT_REGMAP
 
-config SND_RICHTEK_SPM
-	bool "Richtek SPM Class"
-	help
-	  Say Y here to enable Richtek SPM Class support.
-	  This is a IPC Command for audio dsp and amp driver.
-	  Enable it, driver can get hifi3 data.
-	  Disable it, driver cannot get hifi3 data.
-
-config SND_SOC_RT5512
-	tristate "Mediatek RT5512 speaker amplifier"
-	depends on I2C
-	select SND_RICHTEK_SPM
-	help
-	  Config of RT5512. It is a Smart power
-	  amplifier which contain speaker protection,
-	  multi-band DRC, equalizer function. It would
-	  be set to yes if device with RT5512 on it.
+#add aw87xxx pa
+source "sound/soc/codecs/aw87xxx/Kconfig"
 
 endmenu

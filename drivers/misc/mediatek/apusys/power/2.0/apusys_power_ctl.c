@@ -255,8 +255,9 @@ void apusys_clk_path_update_pwr(enum DVFS_USER user, enum DVFS_VOLTAGE voltage)
 			dvfs_clk_path_max_vol[user][path_volt_index] :
 			voltage);
 
-			PWR_LOG_INF("%s, user_path_volt[%s][%d]=%d\n",
+			PWR_LOG_INF("%s, volt=%d, user_path_volt[%s][%d]=%d\n",
 			__func__,
+			voltage,
 			user_str[user],
 			path_volt_index,
 			apusys_opps.user_path_volt[user][path_volt_index]);
@@ -542,7 +543,7 @@ void apusys_frequency_check(void)
 			if (apusys_power_on == false &&
 #ifndef CONFIG_MACH_MT6853
 			apusys_opps.is_power_on[EDMA] == false &&
-#if !defined(CONFIG_MACH_MT6873) && !defined(CONFIG_MACH_MT6877)
+#ifndef CONFIG_MACH_MT6873
 			apusys_opps.is_power_on[EDMA2] == false &&
 #endif
 #endif

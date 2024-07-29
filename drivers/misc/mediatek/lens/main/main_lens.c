@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (C) 2021 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -145,6 +146,8 @@ static struct stAF_DrvList g_stAF_DrvList[MAX_NUM_OF_LENS] = {
 	 LC898217AFC_Release, LC898217AFC_GetFileName, NULL},
 	{1, AFDRV_LC898229AF, LC898229AF_SetI2Cclient, LC898229AF_Ioctl,
 	 LC898229AF_Release, LC898229AF_GetFileName, NULL},
+	 {1, AFDRV_OV5645AF, OV5645AF_SetI2Cclient,
+	OV5645AF_Ioctl, OV5645AF_Release, NULL},
 	{1, AFDRV_LC898122AF, LC898122AF_SetI2Cclient, LC898122AF_Ioctl,
 	 LC898122AF_Release, LC898122AF_GetFileName, NULL},
 	{1, AFDRV_WV511AAF, WV511AAF_SetI2Cclient, WV511AAF_Ioctl,
@@ -260,7 +263,7 @@ static int af_pinctrl_set(int pin, int state)
 static struct regulator *regVCAMAF;
 static int g_regVCAMAFEn;
 
-static void AFRegulatorCtrl(int Stage)
+void AFRegulatorCtrl(int Stage)
 {
 	LOG_INF("AFIOC_S_SETPOWERCTRL regulator_put %p\n", regVCAMAF);
 
@@ -285,22 +288,6 @@ static void AFRegulatorCtrl(int Stage)
 				#elif defined(CONFIG_MACH_MT6771)
 				regVCAMAF =
 					regulator_get(lens_device, "vldo28");
-				#elif defined(CONFIG_MACH_MT6833)
-				if (strncmp(CONFIG_ARCH_MTK_PROJECT,
-					"k6833v1_64_6360_alpha", 20) == 0) {
-					regVCAMAF =
-					regulator_get(lens_device, "vmch");
-				} else {
-					#if defined(CONFIG_REGULATOR_MT6317)
-					regVCAMAF =
-					regulator_get(lens_device, "mt6317-ldo3");
-					LOG_INF("regulator_get(%s)\n", "mt6317-ldo3");
-					#else
-					regVCAMAF =
-					regulator_get(lens_device, "vcamio");
-					LOG_INF("regulator_get(%s)\n", "vcamio");
-					#endif
-				}
 				#elif defined(CONFIG_MACH_MT6853)
 				if (strncmp(CONFIG_ARCH_MTK_PROJECT,
 					"k6853v1_64_6360_alpha", 20) == 0) {
@@ -319,9 +306,6 @@ static void AFRegulatorCtrl(int Stage)
 					regVCAMAF =
 					regulator_get(lens_device, "vcamio");
 				}
-				#elif defined(CONFIG_MACH_MT6781)
-				regVCAMAF =
-					regulator_get(lens_device, "rt5133-ldo3");
 				#elif defined(CONFIG_MACH_MT6885) || defined(CONFIG_MACH_MT6893)
 				if (strncmp(CONFIG_ARCH_MTK_PROJECT,
 					"k6885v1_64_alpha", 16) == 0) {
@@ -940,8 +924,10 @@ static struct platform_driver g_stAF_Driver = {
 #endif
 	} };
 
+#ifndef CONFIG_OF
 static struct platform_device g_stAF_device = {
 	.name = PLATFORM_DRIVER_NAME, .id = 0, .dev = {} };
+#endif
 
 static int __init MAINAF_i2C_init(void)
 {
@@ -949,10 +935,12 @@ static int __init MAINAF_i2C_init(void)
 	i2c_register_board_info(LENS_I2C_BUSNUM, &kd_lens_dev, 1);
 #endif
 
+#ifndef CONFIG_OF
 	if (platform_device_register(&g_stAF_device)) {
 		LOG_INF("failed to register AF driver\n");
 		return -ENODEV;
 	}
+#endif
 
 	if (platform_driver_register(&g_stAF_Driver)) {
 		LOG_INF("Failed to register AF driver\n");

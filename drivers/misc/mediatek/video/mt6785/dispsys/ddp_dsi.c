@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (C) 2021 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -45,7 +46,9 @@
 
 #include "ddp_clkmgr.h"
 #include "primary_display.h"
-
+#ifdef CONFIG_ADB_WRITE_CMD_FEATURE
+#include "disp_recovery.h"
+#endif
 /*****************************************************************************/
 enum MIPITX_PAD_VALUE {
 	PAD_D2P_V = 0,
@@ -68,7 +71,10 @@ enum MIPITX_PAD_VALUE {
 				DISP_REG_CMDQ_POLLING(cmdq, addr, value, mask)
 #define DSI_INREG32(type, addr) INREG32(addr)
 #define DSI_READREG32(type, dst, src) mt_reg_sync_writel(INREG32(src), dst)
-
+#ifdef CONFIG_ADB_WRITE_CMD_FEATURE
+static  enum DISP_MODULE_ENUM g_module;
+struct LCM_DRIVER *g_lcm_drv;
+#endif
 static int dsi_reg_op_debug;
 
 #define BIT_TO_VALUE(TYPE, bit)				\
@@ -209,7 +215,9 @@ unsigned int data_lane2[2] = { 0 }; /* MIPITX_DSI_DATA_LANE2 */
 unsigned int data_lane3[2] = { 0 }; /* MIPITX_DSI_DATA_LANE3 */
 
 unsigned int mipitx_impedance_backup[50];
-
+#ifdef CONFIG_ADB_WRITE_CMD_FEATURE
+static struct LCM_UTIL_FUNCS *utils = NULL;
+#endif
 static void backup_mipitx_impedance(void)
 {
 	int i = 0, j = 0, cnt = 0;
@@ -1671,7 +1679,7 @@ void DSI_CPHY_clk_setting(enum DISP_MODULE_ENUM module, struct cmdqRecStruct *cm
 		//MIPITX_OUTREG32(DSI_PHY_REG[i]+MIPITX_IMPENDANCE_2, 0x00001010);
 
 		/*set volate*/
-		MIPITX_OUTREG32(DSI_PHY_REG[i]+MIPITX_VOLTAGE_SEL, 0x4444236A);
+		MIPITX_OUTREG32(DSI_PHY_REG[i]+MIPITX_VOLTAGE_SEL, 0x444423EA);
 
 		/*set lane swap*/
 		if (dsi_params->lane_swap_en) {
@@ -4230,7 +4238,193 @@ static void lcm_mdelay(UINT32 ms)
 	else
 		msleep(ms);
 }
+#ifdef CONFIG_ADB_WRITE_PARAM_FEATURE
+struct LCM_setting_table {
+	unsigned int cmd;
+	unsigned char count;
+	unsigned char para_list[64];
+};
 
+struct LCM_mipi_read_write {
+	unsigned int read_enable;
+	unsigned int read_count;
+	unsigned char read_buffer[64];
+	struct LCM_setting_table lcm_setting_table;
+};
+
+static struct LCM_mipi_read_write lcm_mipi_read_write ={0};
+
+static char string_to_hex(const char *str)
+{
+	char val_l = 0;
+	char val_h = 0;
+
+	if (str[0] >= '0' && str[0] <= '9')
+		val_h = str[0] - '0';
+	else if (str[0] <= 'f' && str[0] >= 'a')
+		val_h = 10 + str[0] - 'a';
+	else if (str[0] <= 'F' && str[0] >= 'A')
+		val_h = 10 + str[0] - 'A';
+
+	if (str[1] >= '0' && str[1] <= '9')
+		val_l = str[1]-'0';
+	else if (str[1] <= 'f' && str[1] >= 'a')
+		val_l = 10 + str[1] - 'a';
+	else if (str[1] <= 'F' && str[1] >= 'A')
+		val_l = 10 + str[1] - 'A';
+
+	return (val_h << 4) | val_l;
+}
+
+static int string_merge_into_buf(const char *str, int len, char *buf)
+{
+	int buf_size = 0;
+	int i = 0;
+	const char *p = str;
+
+	while (i < len) {
+		if (((p[0] >= '0' && p[0] <= '9') ||
+			(p[0] <= 'f' && p[0] >= 'a') ||
+			(p[0] <= 'F' && p[0] >= 'A'))
+			&& ((i + 1) < len)) {
+			buf[buf_size] = string_to_hex(p);
+			pr_debug("0x%02x ", buf[buf_size]);
+			buf_size++;
+			i += 2;
+			p += 2;
+		} else {
+			i++;
+			p++;
+		}
+	}
+	return buf_size;
+}
+
+long  lcm_mipi_reg_write(char *buf, unsigned long  count)
+{
+	int retval = 0;
+	int dlen = 0;
+	unsigned int read_enable = 0;
+	unsigned int packet_count = 0;
+	unsigned int register_value = 0;
+	char *input = NULL;
+	char *data = NULL;
+	unsigned char pbuf[3] = {0};
+	unsigned int  i = 0;
+	struct dsi_cmd_desc cmd_tab;
+	struct dsi_cmd_desc lcm_adb_cmd;
+	pr_debug("[%s]: lcm_mipi_reg_write source: count  = %ld,buf = %s ", __func__, count, buf);
+
+	input = buf;
+	memcpy(pbuf, input, 2);
+	pbuf[2] = '\0';
+	retval = kstrtou32(pbuf, 10, &read_enable);
+	if (retval)
+		goto exit;
+	lcm_mipi_read_write.read_enable = !!read_enable;
+	input = input + 3;
+	memcpy(pbuf, input, 2);
+	pbuf[2] = '\0';
+	packet_count = (unsigned int)string_to_hex(pbuf);
+	//pr_debug("[%s]: kxx add for packet_count = %ld,\n ", __func__, packet_count);
+	if (lcm_mipi_read_write.read_enable && !packet_count) {
+		retval = -EINVAL;
+		goto exit;
+	}
+	input = input + 3;
+	memcpy(pbuf, input, 2);
+	pbuf[2] = '\0';
+	register_value = (unsigned int)string_to_hex(pbuf);
+	lcm_mipi_read_write.lcm_setting_table.cmd = register_value;
+
+	if(lcm_mipi_read_write.read_enable) {
+		lcm_mipi_read_write.read_count = packet_count;
+		memset(&cmd_tab, 0, sizeof(struct dsi_cmd_desc));
+		cmd_tab.dtype = lcm_mipi_read_write.lcm_setting_table.cmd;
+		cmd_tab.payload = lcm_mipi_read_write.read_buffer;
+		cmd_tab.dlen = lcm_mipi_read_write.read_count;
+
+		do_lcm_vdo_lp_read(&cmd_tab, 1);
+		pr_debug("read lcm addr:0x%x, len:%d, val:0x%x\n",
+				cmd_tab.dtype, cmd_tab.dlen, *cmd_tab.payload);
+		goto exit;
+	} else {
+		lcm_mipi_read_write.lcm_setting_table.count = (unsigned char)packet_count;
+		memcpy(lcm_mipi_read_write.lcm_setting_table.para_list, "",64);
+		if(count > 11)
+		{
+			data = kzalloc(count - 9, GFP_KERNEL);
+			if (!data) {
+				retval = -ENOMEM;
+				goto exit;
+			}
+		 	data[count-9-1] = '\0';
+			input = input + 3;
+			dlen = string_merge_into_buf(input,count -9,data);
+			memcpy(lcm_mipi_read_write.lcm_setting_table.para_list, data,dlen);
+		}/*
+		if(NULL != utils->dsi_set_cmdq_V22)
+			utils->dsi_set_cmdq_V22(NULL,lcm_mipi_read_write.lcm_setting_table.cmd,lcm_mipi_read_write.lcm_setting_table.count,lcm_mipi_read_write.lcm_setting_table.para_list, 1);
+*/
+/***********************kxx add write*****************************/
+
+
+		lcm_adb_cmd.payload = vmalloc(packet_count * sizeof(unsigned char));
+		lcm_adb_cmd.vc = 0;
+		lcm_adb_cmd.dlen = packet_count;
+		lcm_adb_cmd.link_state = 1;
+		lcm_adb_cmd.dtype = lcm_mipi_read_write.lcm_setting_table.cmd;
+		//lcm_cmd.payload[0] = 0x07;
+		//lcm_cmd.payload[1] = 0xFF;
+		for(i=0;i<lcm_mipi_read_write.lcm_setting_table.count;i++)
+		{
+			lcm_adb_cmd.payload[i] = lcm_mipi_read_write.lcm_setting_table.para_list[i];
+		}
+		do_lcm_vdo_lp_write_without_lock(&lcm_adb_cmd,1);
+
+		vfree(lcm_adb_cmd.payload);
+
+/**********************kxx add write*********************************/
+	}
+
+	pr_debug("[%s]: mipi_write done!\n", __func__);
+	pr_debug("[%s]: write cmd = %d,len = %d\n", __func__,lcm_mipi_read_write.lcm_setting_table.cmd,lcm_mipi_read_write.lcm_setting_table.count);
+	pr_debug("[%s]: mipi_write data: ", __func__);
+	for(i=0;i<lcm_mipi_read_write.lcm_setting_table.count;i++)
+	{
+		pr_debug("0x%x ", lcm_mipi_read_write.lcm_setting_table.para_list[i]);
+	}
+	pr_debug("\n ");
+
+	if(count > 11)
+	{
+		kfree(data);
+	}
+exit:
+	retval = count;
+	return retval;
+}
+
+long  lcm_mipi_reg_read(char *buf)
+{
+	int i = 0;
+	ssize_t count = 0;
+
+	if (lcm_mipi_read_write.read_enable) {
+		for (i = 0; i < lcm_mipi_read_write.read_count; i++) {
+			if (i ==  lcm_mipi_read_write.read_count - 1) {
+				count += snprintf(buf + count, PAGE_SIZE - count, "0x%02x\n",
+				     lcm_mipi_read_write.read_buffer[i]);
+			} else {
+				count += snprintf(buf + count, PAGE_SIZE - count, "0x%02x ",
+				     lcm_mipi_read_write.read_buffer[i]);
+			}
+		}
+	}
+	return count;
+}
+
+#endif
 void DSI_set_cmdq_V11_wrapper_DSI0(void *cmdq, unsigned int *pdata,
 			unsigned int queue_size, unsigned char force_update)
 {
@@ -4347,7 +4541,7 @@ unsigned int DSI_dcs_read_lcm_reg_v2_wrapper_DSIDUAL(UINT8 cmd, UINT8 *buffer,
 long lcd_enp_bias_setting(unsigned int value)
 {
 	long ret = 0;
-#ifndef CONFIG_FPGA_EARLY_PORTING
+#if 0
 	if (value) { /* power on gate power ic */
 		ret |=
 		    disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_BIAS_ENP1);
@@ -4375,13 +4569,17 @@ long lcd_enp_bias_setting(unsigned int value)
 int ddp_dsi_set_lcm_utils(enum DISP_MODULE_ENUM module,
 			  struct LCM_DRIVER *lcm_drv)
 {
+#ifdef CONFIG_ADB_WRITE_PARAM_FEATURE
+#else
 	struct LCM_UTIL_FUNCS *utils = NULL;
-
+#endif
 	if (lcm_drv == NULL) {
 		DISP_PR_ERR("lcm_drv is null\n");
 		return -1;
 	}
-
+#ifdef CONFIG_ADB_WRITE_PARAM_FEATURE
+	g_lcm_drv = lcm_drv;
+#endif
 	if (module == DISP_MODULE_DSI0) {
 		utils = (struct LCM_UTIL_FUNCS *)&lcm_utils_dsi0;
 	} else if (module == DISP_MODULE_DSI1) {
@@ -4392,7 +4590,9 @@ int ddp_dsi_set_lcm_utils(enum DISP_MODULE_ENUM module,
 		DISP_PR_INFO("wrong module: %d\n", module);
 		return -1;
 	}
-
+#ifdef CONFIG_ADB_WRITE_CMD_FEATURE
+	g_module =	module;
+#endif
 	utils->set_reset_pin = lcm_set_reset_pin;
 	utils->udelay = lcm_udelay;
 	utils->mdelay = lcm_mdelay;
@@ -5840,35 +6040,17 @@ static void keep_LP11_in_sw_ctrl(enum DISP_MODULE_ENUM module,
 	}
 }
 
-int DSI_esd_check_num(struct LCM_DSI_PARAMS *dsi_params)
-{
-	int i, cnt;
-
-	for (i = 0, cnt = 0; i < 3; i++) {
-		if (dsi_params->lcm_esd_check_table[i].cmd)
-			cnt++;
-	}
-
-	return cnt;
-}
-
 int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle,
 		       enum CMDQ_STATE state)
 {
 	int ret = 0;
-	int i = 0, j = 0;
+	int i = 0;
 	int dsi_i = 0;
 	struct LCM_DSI_PARAMS *dsi_params = NULL;
-	struct DSI_T0_INS t0, t1;
+	struct DSI_T0_INS t0;
 	struct DSI_RX_DATA_REG read_data0;
 	struct DSI_RX_DATA_REG read_data1;
-	struct DSI_RX_DATA_REG read_data2;
-	struct DSI_RX_DATA_REG read_data3;
-	unsigned char packet_type;
-	unsigned char buffer[30];
-	int recv_data_cnt = 0;
-
-	static cmdqBackupSlotHandle hSlot[4] = {0, 0, 0, 0};
+	static cmdqBackupSlotHandle hSlot;
 
 	if (module == DISP_MODULE_DSIDUAL)
 		dsi_i = 0;
@@ -5933,15 +6115,9 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle,
 					DSI_GERNERIC_READ_LONG_PACKET_ID;
 			t0.Data1 = 0;
 
-			t1.CONFG = 0x00;
-			t1.Data0 = dsi_params->lcm_esd_check_table[i].count;
-			t1.Data_ID = 0x37;
-			t1.Data1 = 0;
-
 			/* write DSI CMDQ */
 			DSI_OUTREG32(cmdq_trigger_handle,
-				     &DSI_CMDQ_REG[dsi_i]->data[0],
-				     AS_UINT32(&t1));
+				     &DSI_CMDQ_REG[dsi_i]->data[0], 0x00013700);
 			DSI_OUTREG32(cmdq_trigger_handle,
 				     &DSI_CMDQ_REG[dsi_i]->data[1],
 				     AS_UINT32(&t0));
@@ -5967,20 +6143,12 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle,
 					      DSI_REG[dsi_i]->DSI_INTSTA,
 					      RD_RDY, 0x00000000);
 			}
-			/* 2. save RX data */
-			if (hSlot[0] && hSlot[1] && hSlot[2] && hSlot[3]) {
-				DSI_BACKUPREG32(cmdq_trigger_handle,
-					hSlot[0], i,
-					&DSI_REG[0]->DSI_RX_DATA0);
-				DSI_BACKUPREG32(cmdq_trigger_handle,
-					hSlot[1], i,
-					&DSI_REG[0]->DSI_RX_DATA1);
-				DSI_BACKUPREG32(cmdq_trigger_handle,
-					hSlot[2], i,
-					&DSI_REG[0]->DSI_RX_DATA2);
-				DSI_BACKUPREG32(cmdq_trigger_handle,
-					hSlot[3], i,
-					&DSI_REG[0]->DSI_RX_DATA3);
+			/* 2.save RX data */
+			if (hSlot) {
+				DSI_BACKUPREG32(cmdq_trigger_handle, hSlot,
+					i * 2, &DSI_REG[0]->DSI_RX_DATA0);
+				DSI_BACKUPREG32(cmdq_trigger_handle, hSlot,
+					i * 2 + 1, &DSI_REG[0]->DSI_RX_DATA1);
 			}
 			/* 3.write RX_RACK */
 			DSI_OUTREGBIT(cmdq_trigger_handle, struct DSI_RACK_REG,
@@ -5996,60 +6164,43 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle,
 		}
 	} else if (state == CMDQ_ESD_CHECK_CMP) {
 		struct LCM_esd_check_item *lcm_esd_tb;
+		int return_val;
+
 		/* cmp just once and only 1 return value */
 		for (i = 0; i < 3; i++) {
 			if (dsi_params->lcm_esd_check_table[i].cmd == 0)
 				break;
 
 			/* read data */
-			if (hSlot[0] && hSlot[1] && hSlot[2] && hSlot[3]) {
+			if (hSlot) {
 				/* read from slot */
-				cmdqBackupReadSlot(hSlot[0], i,
-					(uint32_t *)&read_data0);
-				cmdqBackupReadSlot(hSlot[1], i,
-					(uint32_t *)&read_data1);
-				cmdqBackupReadSlot(hSlot[2], i,
-					(uint32_t *)&read_data2);
-				cmdqBackupReadSlot(hSlot[3], i,
-					(uint32_t *)&read_data3);
+				cmdqBackupReadSlot(hSlot, i * 2,
+						   (uint32_t *)&read_data0);
+				cmdqBackupReadSlot(hSlot, i * 2 + 1,
+						   (uint32_t *)&read_data1);
 			} else if (i == 0) {
 				/* read from dsi, support only one cmd read */
 				DSI_OUTREG32(NULL, &read_data0, AS_UINT32(
 						&DSI_REG[dsi_i]->DSI_RX_DATA0));
 				DSI_OUTREG32(NULL, &read_data1, AS_UINT32(
-					&DSI_REG[dsi_i]->DSI_RX_DATA1));
-				DSI_OUTREG32(NULL, &read_data2, AS_UINT32(
-					&DSI_REG[dsi_i]->DSI_RX_DATA2));
-				DSI_OUTREG32(NULL, &read_data3, AS_UINT32(
-					&DSI_REG[dsi_i]->DSI_RX_DATA3));
+						&DSI_REG[dsi_i]->DSI_RX_DATA1));
 			}
 
 			lcm_esd_tb = &dsi_params->lcm_esd_check_table[i];
 
-			DISPDBG("[DSI]enter cmp read_data0 byte0~1=0x%x~0x%x\n",
-				read_data0.byte0, read_data0.byte1);
-			DISPDBG("[DSI]enter cmp read_data0 byte2~3=0x%x~0x%x\n",
+			DISPDBG(
+				"[DSI]enter cmp read_data0 byte0=0x%x byte1=0x%x byte2=0x%x byte3=0x%x\n",
+				read_data0.byte0, read_data0.byte1,
 				read_data0.byte2, read_data0.byte3);
-			DISPDBG("[DSI]enter cmp read_data1 byte0~1=0x%x~0x%x\n",
-				read_data1.byte0, read_data1.byte1);
-			DISPDBG("[DSI]enter cmp read_data1 byte2~3=0x%x~0x%x\n",
+			DISPDBG(
+				"[DSI]enter cmp read_data1 byte0=0x%x byte1=0x%x byte2=0x%x byte3=0x%x\n",
+				read_data1.byte0, read_data1.byte1,
 				read_data1.byte2, read_data1.byte3);
-			DISPDBG("[DSI]enter cmp read_data2 byte0~1=0x%x~0x%x\n",
-				read_data2.byte0, read_data2.byte1);
-			DISPDBG("[DSI]enter cmp read_data2 byte2~3=0x%x~0x%x\n",
-				read_data2.byte2, read_data2.byte3);
-			DISPDBG("[DSI]enter cmp read_data3 byte0~1=0x%x~0x%x\n",
-				read_data3.byte0, read_data3.byte1);
-			DISPDBG("[DSI]enter cmp read_data3 byte2~3=0x%x~0x%x\n",
-				read_data3.byte2, read_data3.byte3);
-
-			DISPDBG("[DSI]enter cmp check_tab cmd=0x%x,cnt=0x%x\n",
-				lcm_esd_tb->cmd, lcm_esd_tb->count);
-			DISPDBG
-	("[DSI]para_list[0]=0x%x,para_list[1]=0x%x, para_list[2]=0x%x\n",
+			DISPDBG(
+				"[DSI]enter cmp check_table cmd=0x%x,count=0x%x,para_list[0]=0x%x,para_list[1]=0x%x\n",
+				lcm_esd_tb->cmd, lcm_esd_tb->count,
 				lcm_esd_tb->para_list[0],
-				lcm_esd_tb->para_list[1],
-				lcm_esd_tb->para_list[2]);
+				lcm_esd_tb->para_list[1]);
 			DISPDBG("[DSI]enter cmp DSI+0x200=0x%x\n",
 				AS_UINT32(DISPSYS_DSI0_BASE + 0x200));
 			DISPDBG("[DSI]enter cmp DSI+0x204=0x%x\n",
@@ -6063,103 +6214,31 @@ int ddp_dsi_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_handle,
 			DISPDBG("[DSI]enter cmp DSI+0x0c=0x%x\n",
 				AS_UINT32(DISPSYS_DSI0_BASE + 0x0c));
 
-			packet_type = read_data0.byte0;
-			/* 0x02: acknowledge & error report */
-			/* 0x11: generic short read response(1 byte return) */
-			/* 0x12: generic short read response(2 byte return) */
-			/* 0x1a: generic long read response */
-			/* 0x1c: dcs long read response */
-			/* 0x21: dcs short read response(1 byte return) */
-			/* 0x22: dcs short read response(2 byte return) */
-			if (packet_type == 0x1A || packet_type == 0x1C) {
-				recv_data_cnt = read_data0.byte1
-					+ read_data0.byte2 * 16;
+			if (read_data0.byte0 == 0x1C)
+				return_val = read_data1.byte0;
+			else
+				return_val = read_data0.byte1;
 
-				if (recv_data_cnt > RT_MAX_NUM) {
-					DISPDBG
-			("DSI read long packet data exceeds 10 bytes\n");
-					recv_data_cnt = RT_MAX_NUM;
-				}
-				if (recv_data_cnt > lcm_esd_tb->count)
-					recv_data_cnt = lcm_esd_tb->count;
-
-				DISPCHECK("DSI read long packet size: %d\n",
-					recv_data_cnt);
-				if (recv_data_cnt <= 4) {
-					memcpy((void *)buffer,
-					(void *)&read_data1, recv_data_cnt);
-				} else if (recv_data_cnt <= 8) {
-					memcpy((void *)buffer,
-					(void *)&read_data1, 4);
-					memcpy((void *)(buffer + 4),
-					(void *)&read_data2, recv_data_cnt - 4);
-				} else {
-					memcpy((void *)buffer,
-						(void *)&read_data1, 4);
-					memcpy((void *)(buffer + 4),
-						(void *)&read_data2, 4);
-					memcpy((void *)(buffer + 8),
-					(void *)&read_data3, recv_data_cnt - 8);
-				}
-
-			} else if (packet_type == 0x11 || packet_type == 0x21) {
-				recv_data_cnt = 1;
-				memcpy((void *)buffer,
-				(void *)&read_data0.byte1, recv_data_cnt);
-
-			} else if (packet_type == 0x12 || packet_type == 0x22) {
-				recv_data_cnt = 2;
-				if (recv_data_cnt > lcm_esd_tb->count)
-					recv_data_cnt = lcm_esd_tb->count;
-
-				memcpy((void *)buffer,
-				(void *)&read_data0.byte1, recv_data_cnt);
-
-			} else if (packet_type == 0x02) {
-				DISPCHECK
-					("read return type is 0x02, re-read\n");
+			if (return_val == lcm_esd_tb->para_list[0]) {
+				/* clear rx data */
+				ret = 0; /* esd pass */
 			} else {
-				DISPCHECK
-			("read return type is non-recognite, type = 0x%x\n",
-					packet_type);
-			}
-			DISPDBG("[DSI]packet_type~recv_data_cnt = 0x%x~0x%x\n",
-				packet_type, recv_data_cnt);
-			/*do read data cmp*/
-			for (j = 0; j < lcm_esd_tb->count; j++) {
-
-				DISPDBG("buffer[%d]=0x%x\n", j, buffer[j]);
-				if (buffer[j] != lcm_esd_tb->para_list[j]) {
-					DISPDBG
-			("buffer[%d]0x%x != lcm_esd_tb->para_list[%d]0x%x\n",
-				j, buffer[j], j, lcm_esd_tb->para_list[j]);
-
-					ret |= 1;/*esd failed*/
-					break;
-				}
-				ret |= 0;/*esd pass*/
-				DISPDBG("[DSI]cmp pass cnt = %d\n", j);
-			}
-
-			if (ret)/*esd failed*/
+				/* esd fail */
+				DISP_PR_ERR(
+				"[DSI]cmp fail:read(0x%x)!=expect(0x%x)\n",
+					    read_data0.byte1,
+					    lcm_esd_tb->para_list[0]);
+				ret = 1;
 				break;
+			}
 		}
 	} else if (state == CMDQ_ESD_ALLC_SLOT) {
-		/* create 3 slot */
-		unsigned int h = 0, n = 0;
-
-		n = DSI_esd_check_num(dsi_params);
-		for (h = 0; h < 4; h++)
-			cmdqBackupAllocateSlot(&hSlot[h], n);
-
+		/* create 3 slots */
+		cmdqBackupAllocateSlot(&hSlot, 6);
 	} else if (state == CMDQ_ESD_FREE_SLOT) {
-		unsigned int h = 0;
-
-		for (h = 0; h < 4; h++) {
-			if (hSlot[h]) {
-				cmdqBackupFreeSlot(hSlot[h]);
-				hSlot[h] = 0;
-			}
+		if (hSlot) {
+			cmdqBackupFreeSlot(hSlot);
+			hSlot = 0;
 		}
 	} else if (state == CMDQ_STOP_VDO_MODE) {
 		/* use cmdq to stop dsi vdo mode */

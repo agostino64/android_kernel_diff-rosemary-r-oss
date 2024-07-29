@@ -134,8 +134,7 @@ static bool is_adsp_core_suspend(struct adsp_priv *pdata)
 
 	return check_hifi_status(ADSP_A_IS_WFI) &&
 	       check_hifi_status(ADSP_AXI_BUS_IS_IDLE) &&
-	       (status == ADSP_SUSPEND) &&
-	       is_adsp_genirq_idle(pdata->id);
+	       (status == ADSP_SUSPEND);
 }
 
 int adsp_core0_suspend(void)

@@ -1383,7 +1383,7 @@ static struct freq_attr *_mt_cpufreq_attr[] = {
 
 static struct cpufreq_driver _mt_cpufreq_driver = {
 #if defined(CONFIG_MTK_PLAT_MT6885_EMULATION) || defined(CONFIG_MACH_MT6893) \
-	|| defined(CONFIG_MACH_MT6833) || defined(CONFIG_MACH_MT6781)
+	|| defined(CONFIG_MACH_MT6833)
 	.flags = CPUFREQ_ASYNC_NOTIFICATION | CPUFREQ_HAVE_GOVERNOR_PER_POLICY,
 #else
 	.flags = CPUFREQ_ASYNC_NOTIFICATION,
@@ -1722,7 +1722,9 @@ static int _mt_cpufreq_pdrv_probe(struct platform_device *pdev)
 			mt_ppm_set_dvfs_table(p->cpu_id,
 			p->freq_tbl_for_cpufreq, p->nr_opp_tbl, lv);
 	}
+
 	mt_ppm_register_client(PPM_CLIENT_DVFS, &ppm_limit_callback);
+
 	pm_notifier(_mt_cpufreq_pm_callback, 0);
 
 	FUNC_EXIT(FUNC_LV_MODULE);

@@ -403,7 +403,7 @@ static void lcm_panel_init(struct lcm *ctx)
 	lcm_dcs_write_seq_static(ctx, 0x15, 0x0E);
 	lcm_dcs_write_seq_static(ctx, 0x16, 0x2F);
 	lcm_dcs_write_seq_static(ctx, 0xFF, 0x98, 0x81, 0x00);
-	lcm_dcs_write_seq_static(ctx, 0x11);
+	lcm_dcs_write_seq_static(ctx, 0x11, 0x00);
 	udelay(120);
 	lcm_dcs_write_seq_static(ctx, 0xFF, 0x98, 0x81, 0x02);
 	lcm_dcs_write_seq_static(ctx, 0x47, 0x00);
@@ -414,7 +414,7 @@ static void lcm_panel_init(struct lcm *ctx)
 	lcm_dcs_write_seq_static(ctx, 0x17, 0xFF);
 	lcm_dcs_write_seq_static(ctx, 0x18, 0x00);
 	lcm_dcs_write_seq_static(ctx, 0xFF, 0x98, 0x81, 0x00);
-	lcm_dcs_write_seq_static(ctx, 0x29);
+	lcm_dcs_write_seq_static(ctx, 0x29, 0x00);
 	udelay(20);
 	lcm_dcs_write_seq_static(ctx, 0x35, 0x00);
 }

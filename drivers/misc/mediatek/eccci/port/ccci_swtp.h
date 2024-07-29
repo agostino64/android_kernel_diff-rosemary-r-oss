@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (C) 2021 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -19,7 +20,7 @@
  */
 #define MAX_PIN_NUM 2
 #define SWTP_COMPATIBLE_DEVICE_ID "mediatek, swtp-eint"
-#define SWTP1_COMPATIBLE_DEVICE_ID "mediatek, swtp1-eint"
+#define SWTP1_COMPATIBLE_DEVICE_ID "mediatek, swtp_1-eint"
 
 
 #define SWTP_EINT_PIN_PLUG_IN	(1)

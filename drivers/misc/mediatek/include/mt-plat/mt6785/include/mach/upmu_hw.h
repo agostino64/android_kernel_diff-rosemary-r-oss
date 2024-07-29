@@ -14,9 +14,6 @@
 #ifndef _MT_PMIC_UPMU_HW_MT6359_H_
 #define _MT_PMIC_UPMU_HW_MT6359_H_
 
-#if defined(CONFIG_MACH_MT6781)
-#include "../../../mt6781/include/mach/upmu_hw.h"
-#else
 #define PMU_FLAG_TABLE_ENTRY struct pmu_flag_table_entry_t
 #define PMU_FLAGS_LIST_ENUM enum PMU_FLAGS_LIST
 
@@ -39355,5 +39352,4 @@ struct pmu_flag_table_entry_t {
 	unsigned char shift;
 };
 
-#endif		/* CONFIG_MACH_MT6781 */
 #endif		/* _MT_PMIC_UPMU_HW_MT6359_H_ */

@@ -1334,7 +1334,7 @@ int hal_dma_dump_reg(struct _MTK_DMA_INFO_STR_ *p_dma_info,
 	unsigned int i_ret = -1;
 
 #if defined(CONFIG_MTK_GIC_V3_EXT)
-	//mt_irq_dump_status(p_dma_info->p_irq->irq_id);
+	mt_irq_dump_status(p_dma_info->p_irq->irq_id);
 #endif
 	if (p_dma_info->dir == DMA_DIR_TX)
 		i_ret = hal_tx_dma_dump_reg(p_dma_info, flag);
@@ -1344,21 +1344,6 @@ int hal_dma_dump_reg(struct _MTK_DMA_INFO_STR_ *p_dma_info,
 		BTIF_WARN_FUNC("unknown dir:%d\n", p_dma_info->dir);
 
 	return i_ret;
-}
-
-void hal_dma_dump_vfifo(struct _MTK_DMA_INFO_STR_ *p_dma_info)
-{
-	struct _DMA_VFIFO_ *p_vfifo;
-
-	if (!p_dma_info)
-		return;
-
-	p_vfifo = p_dma_info->p_vfifo;
-	if (!p_vfifo || !p_vfifo->p_vir_addr)
-		return;
-
-	btif_dump_array(p_dma_info->dir == DMA_DIR_RX ? "RX" : "TX",
-		p_vfifo->p_vir_addr, p_vfifo->vfifo_size);
 }
 
 static int _tx_dma_flush(struct _MTK_DMA_INFO_STR_ *p_dma_info)

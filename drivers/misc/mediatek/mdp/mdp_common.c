@@ -47,10 +47,6 @@
 #include <linux/mailbox_controller.h>
 #include <linux/module.h>
 
-#if IS_ENABLED(CONFIG_MTK_SVP_ON_MTEE_SUPPORT) || IS_ENABLED(CONFIG_MTK_CAM_GENIEZONE_SUPPORT)
-#include "tz_m4u.h"
-#endif
-
 #ifdef CMDQ_SECURE_PATH_SUPPORT
 #include <cmdq-sec.h>
 #endif
@@ -1286,7 +1282,6 @@ s32 cmdq_mdp_handle_sec_setup(struct cmdqSecDataStruct *secData,
 	void *addr_meta;
 	u32 addr_meta_size;
 	struct cmdq_client *cl;
-	s32 sec_id = -1;
 
 	/* set secure data */
 	handle->secStatus = NULL;
@@ -1363,31 +1358,14 @@ s32 cmdq_mdp_handle_sec_setup(struct cmdqSecDataStruct *secData,
 		secData->addrMetadataCount,
 		addr_meta);
 
-#if IS_ENABLED(CONFIG_MTK_SVP_ON_MTEE_SUPPORT)
-#ifdef CMDQ_ENG_SVP_MTEE_GROUP_BITS
-	if (handle->engineFlag & CMDQ_ENG_SVP_MTEE_GROUP_BITS) {
-		sec_id = SEC_ID_SVP;
-		cmdq_sec_pkt_set_mtee(handle->pkt, true, sec_id);
-	}
+#ifdef CMDQ_ENG_MTEE_GROUP_BITS
+	if (handle->engineFlag & CMDQ_ENG_MTEE_GROUP_BITS)
+		cmdq_sec_pkt_set_mtee(handle->pkt, true);
+	else
+		cmdq_sec_pkt_set_mtee(handle->pkt, false);
+	CMDQ_LOG("handle:%p mtee:%d\n", handle,
+		((struct cmdq_sec_data *)handle->pkt->sec_data)->mtee);
 #endif
-#endif
-#if IS_ENABLED(CONFIG_MTK_CAM_GENIEZONE_SUPPORT)
-#ifdef CMDQ_ENG_ISP_MTEE_GROUP_BITS
-	if (handle->engineFlag & CMDQ_ENG_ISP_MTEE_GROUP_BITS) {
-		sec_id = SEC_ID_SEC_CAM;
-		cmdq_sec_pkt_set_mtee(handle->pkt, true, sec_id);
-	}
-#endif
-#endif
-	if (-1 == sec_id)
-		cmdq_sec_pkt_set_mtee(handle->pkt, false, sec_id);
-
-	CMDQ_LOG("handle:%p mtee:%d dapc:%#llx(%#llx) port:%#llx(%#llx) sec_id:%d\n",
-		handle,
-		((struct cmdq_sec_data *)handle->pkt->sec_data)->mtee,
-		handle->secData.enginesNeedDAPC, dapc,
-		handle->secData.enginesNeedPortSecurity, port,
-		sec_id);
 
 	kfree(addr_meta);
 	return 0;
@@ -2506,10 +2484,6 @@ static void cmdq_mdp_begin_task_virtual(struct cmdqRecStruct *handle,
 
 	pmqos_curr_record =
 		kzalloc(sizeof(struct mdp_pmqos_record), GFP_KERNEL);
-	if (unlikely(!pmqos_curr_record)) {
-		CMDQ_ERR("alloc pmqos_curr_record fail\n");
-		return;
-	}
 	handle->user_private = pmqos_curr_record;
 
 	do_gettimeofday(&curr_time);
@@ -2800,10 +2774,6 @@ static void cmdq_mdp_end_task_virtual(struct cmdqRecStruct *handle,
 	do_gettimeofday(&curr_time);
 	mdp_curr_pmqos = (struct mdp_pmqos *)handle->prop_addr;
 	pmqos_curr_record = (struct mdp_pmqos_record *)handle->user_private;
-	if (unlikely(!pmqos_curr_record)) {
-		CMDQ_ERR("alloc pmqos_curr_record fail\n");
-		return;
-	}
 	pmqos_curr_record->submit_tm = curr_time;
 
 	expired = curr_time.tv_sec > mdp_curr_pmqos->tv_sec ||

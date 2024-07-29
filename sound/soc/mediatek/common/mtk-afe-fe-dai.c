@@ -2,6 +2,7 @@
  * mtk-afe-fe-dais.c  --  Mediatek afe fe dai operator
  *
  * Copyright (c) 2016 MediaTek Inc.
+ * Copyright (C) 2021 XiaoMi, Inc.
  * Author: Garlic Tseng <garlic.tseng@mediatek.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -47,6 +48,10 @@
 
 #if defined(CONFIG_SND_SOC_MTK_SCP_SMARTPA)
 #include "../scp_spk/mtk-scp-spk-mem-control.h"
+#endif
+
+#if defined(CONFIG_MTK_ULTRASND_PROXIMITY)
+#include "../scp_ultra/mtk-scp-ultra-mem-control.h"
 #endif
 
 #define AFE_BASE_END_OFFSET 8
@@ -239,6 +244,21 @@ int mtk_afe_fe_hw_params(struct snd_pcm_substream *substream,
 	}
 #endif
 
+#if defined(CONFIG_MTK_ULTRASND_PROXIMITY)
+	if (memif->scp_ultra_enable) {
+		ret = mtk_scp_ultra_allocate_mem(substream,
+						 &substream->runtime->dma_addr,
+						 &substream->runtime->dma_area,
+						 substream->runtime->dma_bytes,
+						 params_format(params),
+						 afe);
+		if (ret < 0)
+			return ret;
+
+		goto BYPASS_AFE_FE_ALLOCATE_MEM;
+	}
+#endif
+
 	if (memif->use_dram_only == 0 &&
 	    mtk_audio_sram_allocate(afe->sram,
 				    &substream->runtime->dma_addr,
@@ -313,7 +333,8 @@ END:
 	}
 
 #if defined(CONFIG_MTK_VOW_BARGE_IN_SUPPORT) ||\
-	defined(CONFIG_SND_SOC_MTK_SCP_SMARTPA)
+	defined(CONFIG_SND_SOC_MTK_SCP_SMARTPA) ||\
+	defined(CONFIG_MTK_ULTRASND_PROXIMITY)
 BYPASS_AFE_FE_ALLOCATE_MEM:
 #endif
 	/* set channel */
@@ -368,6 +389,11 @@ int mtk_afe_fe_hw_free(struct snd_pcm_substream *substream,
 	if (memif->scp_spk_enable)
 		return mtk_scp_spk_free_mem(substream, afe);
 #endif
+#if defined(CONFIG_MTK_ULTRASND_PROXIMITY)
+	if (memif->scp_ultra_enable)
+		return mtk_scp_ultra_free_mem(substream, afe);
+#endif
+
 	if (memif->using_sram) {
 		memif->using_sram = 0;
 		return mtk_audio_sram_free(afe->sram, substream);
@@ -624,12 +650,11 @@ EXPORT_SYMBOL_GPL(mtk_memif_set_disable);
 #if defined(CONFIG_MTK_AUDIODSP_SUPPORT)
 int mtk_dsp_memif_set_enable(struct mtk_base_afe *afe, int id)
 {
-	int ret = 0, adsp_sem_ret = ADSP_ERROR;
+	int ret = 0, adsp_sem_ret = 0;
 
-	if (is_adsp_feature_in_active())
-		adsp_sem_ret = get_adsp_semaphore(SEMA_AUDIOREG);
+	adsp_sem_ret = get_adsp_semaphore(SEMA_AUDIOREG);
 	/* get sem ok*/
-	if (adsp_sem_ret == ADSP_OK) {
+	if (!adsp_sem_ret) {
 		ret = mtk_memif_set_enable(afe, id);
 		release_adsp_semaphore(SEMA_AUDIOREG);
 	} else {
@@ -644,12 +669,11 @@ EXPORT_SYMBOL_GPL(mtk_dsp_memif_set_enable);
 
 int mtk_dsp_memif_set_disable(struct mtk_base_afe *afe, int id)
 {
-	int ret = 0, adsp_sem_ret = ADSP_ERROR;
+	int ret = 0, adsp_sem_ret = 0;
 
-	if (is_adsp_feature_in_active())
-		adsp_sem_ret = get_adsp_semaphore(SEMA_AUDIOREG);
+	adsp_sem_ret = get_adsp_semaphore(SEMA_AUDIOREG);
 	/* get sem ok*/
-	if (adsp_sem_ret == ADSP_OK) {
+	if (!adsp_sem_ret) {
 		ret = mtk_memif_set_disable(afe, id);
 		release_adsp_semaphore(SEMA_AUDIOREG);
 	} else {
@@ -666,17 +690,16 @@ EXPORT_SYMBOL_GPL(mtk_dsp_memif_set_disable);
 int mtk_dsp_irq_set_enable(struct mtk_base_afe *afe,
 			   const struct mtk_base_irq_data *irq_data)
 {
-	int ret = 0, adsp_sem_ret = ADSP_ERROR;
+	int ret = 0, adsp_sem_ret = 0;
 
 	if (!afe)
 		return -EPERM;
 	if (!irq_data)
 		return -EPERM;
 
-	if (is_adsp_feature_in_active())
-		adsp_sem_ret = get_adsp_semaphore(SEMA_AUDIOREG);
+	adsp_sem_ret = get_adsp_semaphore(SEMA_AUDIOREG);
 	/* get sem ok*/
-	if (adsp_sem_ret == ADSP_OK) {
+	if (!adsp_sem_ret) {
 		regmap_update_bits(afe->regmap, irq_data->irq_en_reg,
 				   1 << irq_data->irq_en_shift,
 				   1 << irq_data->irq_en_shift);
@@ -696,18 +719,17 @@ EXPORT_SYMBOL_GPL(mtk_dsp_irq_set_enable);
 int mtk_dsp_irq_set_disable(struct mtk_base_afe *afe,
 			    const struct mtk_base_irq_data *irq_data)
 {
-	int ret = 0, adsp_sem_ret = ADSP_ERROR;
+	int ret = 0, adsp_sem_ret = 0;
 
 	if (!afe)
 		return -EPERM;
 	if (!irq_data)
 		return -EPERM;
 
-	if (is_adsp_feature_in_active())
-		adsp_sem_ret = get_adsp_semaphore(SEMA_AUDIOREG);
+	adsp_sem_ret = get_adsp_semaphore(SEMA_AUDIOREG);
 
 	/* get sem ok*/
-	if (adsp_sem_ret == ADSP_OK) {
+	if (!adsp_sem_ret) {
 		regmap_update_bits(afe->regmap, irq_data->irq_en_reg,
 				   1 << irq_data->irq_en_shift,
 				   0 << irq_data->irq_en_shift);

@@ -68,8 +68,6 @@ static struct mtk_adsp_task_attr adsp_task_attr[AUDIO_TASK_DAI_NUM] = {
 				      KTV_FEATURE_ID, false},
 	[AUDIO_TASK_CAPTURE_RAW_ID] = {false, -1, -1, -1,
 				       CAPTURE_RAW_FEATURE_ID, false},
-	[AUDIO_TASK_FM_ADSP_ID] = {true, -1, MT6785_MEMIF_VUL4, -1,
-				      FM_ADSP_FEATURE_ID, false},
 };
 
 /* task share mem block */
@@ -182,11 +180,11 @@ static struct audio_dsp_dram
 static struct audio_dsp_dram
 	adsp_sharemem_fast_mblock[ADSP_TASK_SHAREMEM_NUM] = {
 		{
-			.size = 0x400, /* 1024 bytes */
+			.size = 0x0, /* 0 bytes */
 			.phy_addr = 0,
 		},
 		{
-			.size = 0x400, /* 1024 bytes */
+			.size = 0x0, /* 0 bytes */
 			.phy_addr = 0,
 		},
 };
@@ -205,18 +203,6 @@ static struct audio_dsp_dram
 
 static struct audio_dsp_dram
 	adsp_sharemem_capture_raw_mblock[ADSP_TASK_SHAREMEM_NUM] = {
-		{
-			.size = 0x400, /* 1024 bytes */
-			.phy_addr = 0,
-		},
-		{
-			.size = 0x400, /* 1024 bytes */
-			.phy_addr = 0,
-		},
-};
-
-static struct audio_dsp_dram
-	adsp_sharemem_fm_mblock[ADSP_TASK_SHAREMEM_NUM] = {
 		{
 			.size = 0x400, /* 1024 bytes */
 			.phy_addr = 0,
@@ -257,8 +243,6 @@ struct audio_dsp_dram *mtk_get_adsp_sharemem_block(int audio_task_id)
 		return adsp_sharemem_ktv_mblock;
 	case AUDIO_TASK_CAPTURE_RAW_ID:
 		return adsp_sharemem_capture_raw_mblock;
-	case AUDIO_TASK_FM_ADSP_ID:
-		return adsp_sharemem_fm_mblock;
 	default:
 		pr_info("%s err audio_task_id = %d\n", __func__, audio_task_id);
 	}
@@ -298,8 +282,6 @@ struct mtk_adsp_task_attr *mtk_get_adsp_task_attr(int adsp_id)
 		return &adsp_task_attr[AUDIO_TASK_KTV_ID];
 	case AUDIO_TASK_CAPTURE_RAW_ID:
 		return &adsp_task_attr[AUDIO_TASK_CAPTURE_RAW_ID];
-	case AUDIO_TASK_FM_ADSP_ID:
-		return &adsp_task_attr[AUDIO_TASK_FM_ADSP_ID];
 	default:
 		break;
 	}
@@ -313,7 +295,6 @@ bool mtk_adsp_dai_id_support_share_mem(int dai_id)
 	switch (dai_id) {
 	case MT6785_MEMIF_DL1:
 	case MT6785_MEMIF_DL12:
-	case MT6785_MEMIF_DL2:
 	case MT6785_MEMIF_DL3:
 	case MT6785_MEMIF_DL4:
 	case MT6785_MEMIF_DL5:
@@ -330,6 +311,7 @@ bool mtk_adsp_dai_id_support_share_mem(int dai_id)
 	case MT6785_MEMIF_AWB2:
 	case MT6785_MEMIF_NUM:
 		return true;
+	case MT6785_MEMIF_DL2:
 	case MT6785_MEMIF_DAI:
 	case MT6785_MEMIF_DAI2:
 	case MT6785_MEMIF_MOD_DAI:

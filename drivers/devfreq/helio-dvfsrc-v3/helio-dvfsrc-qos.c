@@ -112,7 +112,6 @@ static void dvfsrc_restore(void)
 		}
 		commit_data(i, pm_qos_request(class_type), 0);
 	}
-	dvfsrc->qos_enabled = 1;
 }
 
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
@@ -183,14 +182,6 @@ int is_dvfsrc_enabled(void)
 {
 	if (dvfsrc)
 		return dvfsrc->dvfsrc_enabled == 1;
-
-	return 0;
-}
-
-int is_dvfsrc_qos_enabled(void)
-{
-	if (dvfsrc)
-		return dvfsrc->qos_enabled == 1;
 
 	return 0;
 }
@@ -500,6 +491,7 @@ static int helio_dvfsrc_probe(struct platform_device *pdev)
 		dvfsrc->dvfsrc_flag = 0;
 
 	helio_dvfsrc_platform_pre_init(dvfsrc);
+
 	helio_dvfsrc_config(dvfsrc);
 
 	pr_info("%s: init done\n", __func__);

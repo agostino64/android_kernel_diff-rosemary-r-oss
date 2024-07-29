@@ -82,8 +82,10 @@ enum DISP_PMQOS_SLOT {
 	(DISP_SLOT_CUR_CONFIG_FENCE_BASE + (0x4 * (n)))
 #define DISP_SLOT_PRESENT_FENCE(n)                                          \
 	(DISP_SLOT_CUR_CONFIG_FENCE(OVL_LAYER_NR) + (0x4 * (n)))
-#define DISP_SLOT_SF_PRESENT_FENCE(n)                                          \
+#define DISP_SLOT_SF_PRESENT_FENCE_CONF(n)                                     \
 	(DISP_SLOT_PRESENT_FENCE(MAX_CRTC) + (0x4 * (n)))
+#define DISP_SLOT_SF_PRESENT_FENCE(n)                                          \
+	(DISP_SLOT_SF_PRESENT_FENCE_CONF(MAX_CRTC) + (0x4 * (n)))
 #define DISP_SLOT_SUBTRACTOR_WHEN_FREE_BASE                                    \
 	(DISP_SLOT_SF_PRESENT_FENCE(MAX_CRTC) + 0x4)
 #define DISP_SLOT_SUBTRACTOR_WHEN_FREE(n)                                      \
@@ -668,8 +670,6 @@ struct mtk_cmdq_cb_data {
 	unsigned int misc;
 };
 
-extern unsigned int te_cnt;
-
 int mtk_drm_crtc_enable_vblank(struct drm_device *drm, unsigned int pipe);
 void mtk_drm_crtc_disable_vblank(struct drm_device *drm, unsigned int pipe);
 bool mtk_crtc_get_vblank_timestamp(struct drm_device *dev, unsigned int pipe,
@@ -799,6 +799,5 @@ struct golden_setting_context *
 void mtk_crtc_start_for_pm(struct drm_crtc *crtc);
 void mtk_crtc_stop_for_pm(struct mtk_drm_crtc *mtk_crtc, bool need_wait);
 bool mtk_crtc_frame_buffer_existed(void);
-int m4u_sec_init(void);
 
 #endif /* MTK_DRM_CRTC_H */

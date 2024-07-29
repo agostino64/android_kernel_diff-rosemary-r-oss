@@ -2716,11 +2716,15 @@ static int musb_probe(struct platform_device *pdev)
 	struct resource *iomem;
 
 	iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!iomem)
+		return -ENODEV;
 	base = devm_ioremap(dev, iomem->start, resource_size(iomem));
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
 	iomem = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!iomem)
+		return -ENODEV;
 	pbase = devm_ioremap(dev, iomem->start, resource_size(iomem));
 	if (IS_ERR(pbase))
 		return PTR_ERR(pbase);
@@ -2892,17 +2896,7 @@ bool __attribute__ ((weak)) usb_pre_clock(bool enable)
 static int musb_suspend_noirq(struct device *dev)
 {
 	struct musb *musb = dev_to_musb(dev);
-
-	if (is_host_active(musb)) {
-		if (musb->host_suspend) {
-			DBG(0, "host suspend\n");
-			musb_platform_enable_wakeup(musb);
-			musb_platform_disable_clk(musb);
-			musb_platform_unprepare_clk(musb);
-			usb_hal_dpidle_request(USB_DPIDLE_SUSPEND);
-		}
-		return 0;
-	}
+	/*unsigned long flags; */
 
 	/*No need spin lock in xxx_noirq() */
 	/*spin_lock_irqsave(&musb->lock, flags); */
@@ -2935,17 +2929,6 @@ static int musb_suspend_noirq(struct device *dev)
 static int musb_resume_noirq(struct device *dev)
 {
 	struct musb *musb = dev_to_musb(dev);
-
-	if (is_host_active(musb)) {
-		if (musb->host_suspend) {
-			DBG(0, "host resume\n");
-			usb_hal_dpidle_request(USB_DPIDLE_RESUME);
-			musb_platform_prepare_clk(musb);
-			musb_platform_enable_clk(musb);
-			musb_platform_disable_wakeup(musb);
-		}
-		return 0;
-	}
 
 	usb_pre_clock(true);
 

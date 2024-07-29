@@ -332,9 +332,7 @@ static void mtk_wdma_prepare(struct mtk_ddp_comp *comp)
 	}
 #else
 #if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6833) \
-	|| defined(CONFIG_MACH_MT6877) \
-	|| defined(CONFIG_MACH_MT6781)
+	|| defined(CONFIG_MACH_MT6833)
 	/* Bypass shadow register and read shadow register */
 	mtk_ddp_write_mask_cpu(comp, WDMA_BYPASS_SHADOW,
 		DISP_REG_WDMA_SHADOW_CTRL, WDMA_BYPASS_SHADOW);
@@ -366,14 +364,9 @@ static void mtk_wdma_calc_golden_setting(struct golden_setting_context *gsc,
 	unsigned int fifo_size_uv = 31;
 #endif
 #if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6833) \
-	|| defined(CONFIG_MACH_MT6877)
+	|| defined(CONFIG_MACH_MT6833)
 	unsigned int fifo_size = 578;
 	unsigned int fifo_size_uv = 29;
-#endif
-#if defined(CONFIG_MACH_MT6781)
-	unsigned int fifo_size = 410;
-	unsigned int fifo_size_uv = 200;
 #endif
 	unsigned int fifo;
 	unsigned int factor1 = 4;
@@ -409,9 +402,7 @@ static void mtk_wdma_calc_golden_setting(struct golden_setting_context *gsc,
 		fifo_size_uv = 50;
 #endif
 #if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6833) \
-	|| defined(CONFIG_MACH_MT6877) \
-	|| defined(CONFIG_MACH_MT6781)
+	|| defined(CONFIG_MACH_MT6833)
 		fifo_size = 402;
 		fifo_size_uv = 99;
 #endif
@@ -429,8 +420,7 @@ static void mtk_wdma_calc_golden_setting(struct golden_setting_context *gsc,
 		fifo_size_uv = 109;
 #endif
 #if defined(CONFIG_MACH_MT6873) || defined(CONFIG_MACH_MT6853) \
-	|| defined(CONFIG_MACH_MT6833) || defined(CONFIG_MACH_MT6877) \
-	|| defined(CONFIG_MACH_MT6781)
+	|| defined(CONFIG_MACH_MT6833)
 		fifo_size = 402;
 		fifo_size_uv = 201;
 #endif
@@ -1353,18 +1343,8 @@ static const struct mtk_disp_wdma_data mt6853_wdma_driver_data = {
 	.support_shadow = false,
 };
 
-static const struct mtk_disp_wdma_data mt6877_wdma_driver_data = {
-	.sodi_config = mt6877_mtk_sodi_config,
-	.support_shadow = false,
-};
-
 static const struct mtk_disp_wdma_data mt6833_wdma_driver_data = {
 	.sodi_config = mt6833_mtk_sodi_config,
-	.support_shadow = false,
-};
-
-static const struct mtk_disp_wdma_data mt6781_wdma_driver_data = {
-	.sodi_config = mt6781_mtk_sodi_config,
 	.support_shadow = false,
 };
 
@@ -1379,12 +1359,8 @@ static const struct of_device_id mtk_disp_wdma_driver_dt_match[] = {
 	 .data = &mt6873_wdma_driver_data},
 	{.compatible = "mediatek,mt6853-disp-wdma",
 	 .data = &mt6853_wdma_driver_data},
-	{.compatible = "mediatek,mt6877-disp-wdma",
-	 .data = &mt6877_wdma_driver_data},
 	{.compatible = "mediatek,mt6833-disp-wdma",
 	 .data = &mt6833_wdma_driver_data},
-	{.compatible = "mediatek,mt6781-disp-wdma",
-	 .data = &mt6781_wdma_driver_data},
 	{},
 };
 MODULE_DEVICE_TABLE(of, mtk_disp_wdma_driver_dt_match);

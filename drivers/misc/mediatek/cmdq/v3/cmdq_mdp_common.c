@@ -117,7 +117,6 @@ struct mdp_thread {
 	bool acquired;
 	bool allow_dispatch;
 	bool secure;
-	bool mtee;
 };
 
 struct mdp_context {
@@ -654,10 +653,6 @@ static void cmdq_mdp_lock_thread(struct cmdqRecStruct *handle)
 
 	/* make this thread can be dispath again */
 	mdp_ctx.thread[thread].allow_dispatch = true;
-
-	if (!mdp_ctx.thread[thread].task_count)
-		mdp_ctx.thread[thread].mtee = handle->secData.mtee;
-
 	mdp_ctx.thread[thread].task_count++;
 
 	CMDQ_PROF_END(current->pid, __func__);
@@ -707,8 +702,6 @@ void cmdq_mdp_unlock_thread(struct cmdqRecStruct *handle)
 			mdp_ctx.thread[thread].acquired ? "true" : "false");
 	mdp_ctx.thread[thread].task_count--;
 
-	if (!mdp_ctx.thread[thread].task_count)
-		mdp_ctx.thread[thread].mtee = false;
 	/* if no task on thread, release to cmdq core */
 	/* no need to release thread since secure path use static thread */
 	if (!mdp_ctx.thread[thread].task_count && !handle->secData.is_secure) {
@@ -845,15 +838,8 @@ static s32 cmdq_mdp_find_free_thread(struct cmdqRecStruct *handle)
 	if (cmdq_mdp_check_engine_waiting_unlock(handle) < 0)
 		return CMDQ_INVALID_THREAD;
 
-	if (handle->secData.is_secure) {
-		thread = handle->ctrl->get_thread_id(handle->scenario);
-
-		if (mdp_ctx.thread[thread].task_count &&
-			mdp_ctx.thread[thread].mtee != handle->secData.mtee)
-			return CMDQ_INVALID_THREAD;
-
-		return thread;
-	}
+	if (handle->secData.is_secure)
+		return handle->ctrl->get_thread_id(handle->scenario);
 #endif
 	conflict = cmdq_mdp_check_engine_conflict(handle, &thread);
 	if (conflict) {
@@ -916,12 +902,18 @@ static s32 cmdq_mdp_consume_handle(void)
 	bool acquired = false;
 	struct CmdqCBkStruct *callback = cmdq_core_get_group_cb();
 	bool force_inorder = false;
+	bool secure_run = false;
 
 	/* operation for tasks_wait list need task mutex */
 	mutex_lock(&mdp_task_mutex);
 
 	CMDQ_PROF_MMP(cmdq_mmp_get_event()->consume_done, MMPROFILE_FLAG_START,
 		current->pid, 0);
+
+	handle = list_first_entry_or_null(&mdp_ctx.tasks_wait, typeof(*handle),
+		list_entry);
+	if (handle)
+		secure_run = handle->secData.is_secure;
 
 	/* loop waiting list for pending handles */
 	list_for_each_entry_safe(handle, temp, &mdp_ctx.tasks_wait,
@@ -935,6 +927,14 @@ static s32 cmdq_mdp_consume_handle(void)
 				"skip force inorder handle:0x%p engine:0x%llx\n",
 				handle, handle->engineFlag);
 			continue;
+		}
+
+		if (secure_run != handle->secData.is_secure) {
+			mutex_unlock(&mdp_thread_mutex);
+			CMDQ_LOG(
+				"skip secure inorder handle:%p engine:%#llx\n",
+				handle, handle->engineFlag);
+			break;
 		}
 
 		handle->thread = cmdq_mdp_find_free_thread(handle);

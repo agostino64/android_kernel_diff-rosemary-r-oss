@@ -161,6 +161,7 @@ static int dl_speed_hint(u64 speed, int *in_idx, struct common_cfg_para *cfg)
 	int i;
 	int new_idx, idx;
 	int middle_speed;
+	int dram_frq_lvl;
 
 	if ((!s_dl_dvfs_tbl) || (!s_dl_dvfs_items_num) || (!in_idx))
 		return -1;
@@ -192,7 +193,7 @@ static int dl_speed_hint(u64 speed, int *in_idx, struct common_cfg_para *cfg)
 	cfg->c_frq[2] = s_dl_dvfs_tbl[new_idx].c2_freq;
 	cfg->c_frq[3] = s_dl_dvfs_tbl[new_idx].c3_freq;
 	/* DRAM freq hint*/
-	cfg->dram_frq_lvl = s_dl_dvfs_tbl[new_idx].dram_lvl;
+	dram_frq_lvl = s_dl_dvfs_tbl[new_idx].dram_lvl;
 	/* CPU affinity */
 	mtk_ccci_affinity_rta(s_dl_dvfs_tbl[new_idx].irq_affinity,
 				s_dl_dvfs_tbl[new_idx].task_affinity, 8);
@@ -208,6 +209,7 @@ static int ul_speed_hint(u64 speed, int *in_idx, struct common_cfg_para *cfg)
 	int i;
 	int new_idx, idx;
 	int middle_speed;
+	int dram_frq_lvl;
 
 	if ((!s_ul_dvfs_tbl) || (!s_ul_dvfs_items_num) || (!in_idx))
 		return -1;
@@ -239,7 +241,7 @@ static int ul_speed_hint(u64 speed, int *in_idx, struct common_cfg_para *cfg)
 	cfg->c_frq[2] = s_ul_dvfs_tbl[new_idx].c2_freq;
 	cfg->c_frq[3] = s_ul_dvfs_tbl[new_idx].c3_freq;
 	/* DRAM freq hint*/
-	cfg->dram_frq_lvl = s_ul_dvfs_tbl[new_idx].dram_lvl;
+	dram_frq_lvl = s_ul_dvfs_tbl[new_idx].dram_lvl;
 
 	*in_idx = new_idx;
 

@@ -184,7 +184,7 @@ static void print_vio_mask_sta(void)
 	vio_mask_sta_num = mtk_devapc_ctx->soc->vio_info->vio_mask_sta_num;
 
 	for (i = 0; i < vio_mask_sta_num; i++) {
-		DEVAPC_MSG("%s: (%d:0x%x) %s: (%d:0x%x)\n",
+		DEVAPC_DBG_MSG("%s: (%d:0x%x) %s: (%d:0x%x)\n",
 				"INFRA VIO_MASK", i,
 				readl(mtk_devapc_pd_get(VIO_MASK,
 						mtk_devapc_ctx->soc->devapc_pds,
@@ -236,7 +236,7 @@ static void start_devapc(void)
 	writel(0x80000000, pd_apc_con_reg);
 	print_vio_mask_sta();
 
-	DEVAPC_MSG("Clear INFRA VIO_STA and unmask INFRA VIO_MASK...\n");
+	DEVAPC_DBG_MSG("Clear INFRA VIO_STA and unmask INFRA VIO_MASK...\n");
 
 	vio_shift_sta = readl(pd_vio_shift_sta_reg);
 	if (vio_shift_sta) {
@@ -249,12 +249,10 @@ static void start_devapc(void)
 	} else
 		DEVAPC_MSG("No violation happened before booting kernel\n");
 
-	DEVAPC_MSG("Number of devices: %u\n", mtk_devapc_ctx->soc->ndevices);
-
 	for (i = 0; i < mtk_devapc_ctx->soc->ndevices; i++)
 		if (true == device_info[i].enable_vio_irq) {
-			unmask_infra_module_irq(i);
 			clear_infra_vio_status(i);
+			unmask_infra_module_irq(i);
 		}
 
 	print_vio_mask_sta();
@@ -377,7 +375,7 @@ static uint32_t sync_vio_dbg(int shift_bit)
 	for (shift_count = 0; (shift_count < 100) &&
 		((readl(pd_vio_shift_con_reg) & 0x3) != 0x3);
 		++shift_count)
-		DEVAPC_MSG("Syncing VIO DBG0 & DBG1 (%d, %d)\n",
+		DEVAPC_DBG_MSG("Syncing VIO DBG0 & DBG1 (%d, %d)\n",
 				shift_bit, shift_count);
 
 	if ((readl(pd_vio_shift_con_reg) & 0x3) == 0x3)
@@ -393,7 +391,7 @@ static uint32_t sync_vio_dbg(int shift_bit)
 	writel(0x0, pd_vio_shift_sel_reg);
 	writel(0x1 << shift_bit, pd_vio_shift_sta_reg);
 
-	DEVAPC_MSG("%s%X, %s%X, %s%X\n",
+	DEVAPC_DBG_MSG("%s%X, %s%X, %s%X\n",
 			"VIO_SHIFT_STA=0x",
 			readl(pd_vio_shift_sta_reg),
 			"VIO_SHIFT_SEL=0x",
@@ -404,7 +402,6 @@ static uint32_t sync_vio_dbg(int shift_bit)
 	return sync_done;
 }
 
-#if 0
 static void dump_backtrace(void *passed_regs)
 {
 	struct pt_regs *regs = passed_regs;
@@ -424,7 +421,6 @@ static void dump_backtrace(void *passed_regs)
 	DEVAPC_MSG("====== %s ======\n",
 			"End of dumping Device APC violation tracing");
 }
-#endif
 
 static char *perm_to_string(uint32_t perm)
 {
@@ -456,7 +452,7 @@ static uint32_t get_permission(int vio_index, int domain)
 	slave_type = device_info[vio_index].slave_type;
 	config_idx = device_info[vio_index].config_index;
 
-	DEVAPC_MSG("%s, slave type = 0x%x, config_idx = 0x%x\n",
+	DEVAPC_DBG_MSG("%s, slave type = 0x%x, config_idx = 0x%x\n",
 			__func__,
 			slave_type,
 			config_idx);
@@ -475,12 +471,12 @@ static uint32_t get_permission(int vio_index, int domain)
 		return ret;
 	}
 
-	DEVAPC_MSG("%s, dump perm = 0x%x\n", __func__, ret);
+	DEVAPC_DBG_MSG("%s, dump perm = 0x%x\n", __func__, ret);
 
 	apc_set_idx = config_idx % MOD_NO_IN_1_DEVAPC;
 	ret = (ret & (0x3 << (apc_set_idx * 2))) >> (apc_set_idx * 2);
 
-	DEVAPC_MSG("%s, after shipping, dump perm = 0x%x\n",
+	DEVAPC_DBG_MSG("%s, after shipping, dump perm = 0x%x\n",
 			__func__,
 			(ret & 0x3));
 
@@ -616,11 +612,9 @@ static irqreturn_t devapc_violation_irq(int irq_number, void *dev_id)
 	int i, device_count;
 	uint32_t perm;
 	const char *vio_master;
-	//struct pt_regs *regs = get_irq_regs();
+	struct pt_regs *regs = get_irq_regs();
 	const struct mtk_device_info *device_info;
 	struct mtk_devapc_vio_info *vio_info;
-
-	DEVAPC_MSG("%s: ++\n", __func__);
 
 	device_info = mtk_devapc_ctx->soc->device_info;
 	vio_info = mtk_devapc_ctx->soc->vio_info;
@@ -665,9 +659,7 @@ static irqreturn_t devapc_violation_irq(int irq_number, void *dev_id)
 		}
 	}
 
-	//dump_backtrace(regs);
-
-	DEVAPC_MSG("%s: --\n", __func__);
+	dump_backtrace(regs);
 
 	return IRQ_HANDLED;
 }
@@ -740,8 +732,6 @@ static void devapc_ut(uint32_t cmd)
 	} else {
 		DEVAPC_MSG("%s, cmd(0x%x) not supported\n", __func__, cmd);
 	}
-
-	print_vio_mask_sta();
 }
 
 #ifdef CONFIG_DEVAPC_SWP_SUPPORT
@@ -880,12 +870,10 @@ int mtk_devapc_probe(struct platform_device *pdev,
 	mtk_devapc_ctx->devapc_irq = irq_of_parse_and_map(node,
 			DT_DEVAPC_PD_IDX);
 
-	DEVAPC_MSG("devapc_pd_base: %p, IRQ: %d\n",
+	DEVAPC_DBG_MSG("devapc_pd_base: %p, IRQ: %d\n",
 			mtk_devapc_ctx->devapc_pd_base,
 			mtk_devapc_ctx->devapc_irq);
 
-/* Enable devapc-infra-clock in preloader */
-#ifndef CONFIG_DEVAPC_MT6781
 	/* CCF (Common Clock Framework) */
 	mtk_devapc_ctx->devapc_infra_clk = devm_clk_get(&pdev->dev,
 			"devapc-infra-clock");
@@ -897,13 +885,12 @@ int mtk_devapc_probe(struct platform_device *pdev,
 
 	if (clk_prepare_enable(mtk_devapc_ctx->devapc_infra_clk))
 		return -EINVAL;
-#endif
 
 	start_devapc();
 
 	ret = request_irq(mtk_devapc_ctx->devapc_irq,
 			(irq_handler_t)devapc_violation_irq,
-			IRQF_TRIGGER_NONE, "devapc", NULL);
+			IRQF_TRIGGER_LOW, "devapc", NULL);
 	if (ret) {
 		pr_err(PFX "Failed to request devapc irq, ret(%d)\n", ret);
 		return ret;
@@ -922,10 +909,7 @@ int mtk_devapc_probe(struct platform_device *pdev,
 
 int mtk_devapc_remove(struct platform_device *dev)
 {
-/* devapc-infra-clock is always on */
-#ifndef CONFIG_DEVAPC_MT6781
 	clk_disable_unprepare(mtk_devapc_ctx->devapc_infra_clk);
-#endif
 	return 0;
 }
 

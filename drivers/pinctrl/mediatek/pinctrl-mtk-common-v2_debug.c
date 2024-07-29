@@ -19,10 +19,6 @@
 
 #define PULL_DELAY 50 /* in ms */
 #define FUN_3STATE "gpio_get_value_tristate"
-#define MTK_PINCTRL_DEV_NAME "pinctrl_paris"
-
-static const char *pinctrl_paris_modname = MTK_PINCTRL_DEV_NAME;
-
 int gpio_get_tristate_input(unsigned int pin)
 {
 	struct gpio_device *gdev;
@@ -36,11 +32,10 @@ int gpio_get_tristate_input(unsigned int pin)
 	list_for_each_entry(gdev, &gpio_devices, list) {
 
 		chip = gdev->chip;
-		if (!strncmp(pinctrl_paris_modname, chip->label,
-				strlen(pinctrl_paris_modname))) {
-			hw = gpiochip_get_data(chip);
-			break;
-		}
+
+		hw = gpiochip_get_data(chip);
+
+		break;
 	}
 
 	spin_unlock_irqrestore(&gpio_lock, flags);
@@ -363,11 +358,8 @@ static int mtk_gpio_create_attr(void)
 	list_for_each_entry(gdev, &gpio_devices, list) {
 
 		chip = gdev->chip;
-		if (!strncmp(pinctrl_paris_modname, chip->label,
-				strlen(pinctrl_paris_modname))) {
-			hw = gpiochip_get_data(chip);
-			break;
-		}
+		hw = gpiochip_get_data(chip);
+		break;
 	}
 
 	spin_unlock_irqrestore(&gpio_lock, flags);
